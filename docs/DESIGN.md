@@ -312,6 +312,40 @@ This is also why `tracing/` does not register a pre-tool-call hook (§4).
   modalities on one target — `ModelTarget.validate` rejects it at `New` rather
   than guessing.
 
+### A deliberate divergence: the ToolCall a dynamic policy sees
+
+Python builds the `ToolCall` for a dynamic policy decision by hand
+(`event_processor.py._handle_policy_decision_request`): the raw wire tool name,
+the arguments straight off the wire, and no `canonical_path`. Its own pre-tool
+hook path (`hook_router.py._handle_pre_tool`) does the opposite — normalizes
+the path arguments, derives `canonical_path`, and maps `invoke_subagent` to
+`start_subagent`. Python never notices the gap because its example predicates
+take parsed typed tool arguments rather than the call's canonical path.
+
+Go builds both from the same `PreToolArgs` with `toolCallFromArgs`, so a
+predicate and a hook watching the same call see the same thing. This is a
+knowing divergence from the reference rather than an oversight: a predicate
+that gates on `CanonicalPath` reads an empty string under the Python behavior
+and therefore never matches, which turns a path-scoped deny or ask-user rule
+into a silent allow. Go's `Predicate` takes a `ToolCall` and nothing else —
+there is no typed-arguments form to fall back to — so `CanonicalPath` and
+`Args` are all a Go caller has. A fail-open in a security control is not parity
+worth keeping, and two `ToolCall` construction sites that disagree are a trap
+for the next reader. Do not "restore parity" here without reading this
+paragraph.
+
+Two smaller divergences in the same area, for the same reason:
+
+- **An empty path argument never clears the canonical path.** Python assigns
+  `canonical_path` unconditionally as it walks the path keys, so a later key
+  holding `""` erases what an earlier one supplied. `normalizeArgPaths` skips
+  empty values. This affects `Step.ToolCalls` too, not only policies.
+- **Which path wins when a call carries several.** Python takes the first
+  non-empty key of `WIRE_PATH_ARGUMENT_KEYS`, which is a `frozenset` — its
+  iteration order varies with the process hash seed, so the answer is not
+  stable across runs. `wirePathArgKeys` is a slice and the last non-empty key
+  in its order wins, deterministically.
+
 ### Turn completion and the event queue
 
 An implementation detail with a race in it, worth stating because it has bitten

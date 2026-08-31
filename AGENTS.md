@@ -55,11 +55,12 @@ live end-to-end runs are not possible here.
   only for a language feature the code genuinely needs, and name it in the
   commit.
 - **Parity beats taste.** Where behavior differs from the Python SDK, the
-  Python SDK is right. The shapes are Go's; the behavior is not ours to
-  improve. [`docs/DESIGN.md`](./docs/DESIGN.md) §6 lists the details most often
-  got wrong — in particular that the default configuration is "everything but
-  shell", not read-only, and that the safety-policy gate is an error rather
-  than a warning.
+  Python SDK is right, unless [`docs/DESIGN.md`](./docs/DESIGN.md) §6 records
+  the difference as a deliberate divergence — read it before "restoring"
+  parity anywhere. The shapes are Go's; the behavior is not ours to improve.
+  §6 also lists the details most often got wrong — in particular that the
+  default configuration is "everything but shell", not read-only, and that the
+  safety-policy gate is an error rather than a warning.
 
 ## Build & test
 

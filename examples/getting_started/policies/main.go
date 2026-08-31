@@ -63,9 +63,13 @@ func blocksRM(_ context.Context, call antigravity.ToolCall) (bool, error) {
 //
 // CanonicalPath is filled in by the connection layer for file tools, so a
 // predicate can match a platform-native absolute path without knowing which
-// argument name this particular tool uses for it.
+// argument name this particular tool uses for it. It is empty when the call
+// names no path at all, which is not a match for anything.
 func touchesCriticalFile(_ context.Context, call antigravity.ToolCall) (bool, error) {
 	path := call.CanonicalPath
+	if path == "" {
+		return false, nil
+	}
 	return strings.HasSuffix(path, ".key") || strings.Contains(path, "production"), nil
 }
 

@@ -261,6 +261,18 @@ func TestNormalizeArgPathsLeavesUnrelatedArgumentsAlone(t *testing.T) {
 	}
 }
 
+func TestNormalizeArgPathsIgnoresEmptyPathArguments(t *testing.T) {
+	// A later key that carries no path must not erase the one that does: the
+	// canonical path is what a path-scoped policy matches on, so dropping it
+	// turns a deny into an allow.
+	in := json.RawMessage(`{"path":"file:///tmp/x.txt","output_path":""}`)
+	_, canonical := normalizeArgPaths(in)
+
+	if canonical != "/tmp/x.txt" {
+		t.Errorf("CanonicalPath = %q, want /tmp/x.txt", canonical)
+	}
+}
+
 func TestNormalizeArgPathsIgnoresNonObjects(t *testing.T) {
 	in := json.RawMessage(`"just a string"`)
 	got, canonical := normalizeArgPaths(in)

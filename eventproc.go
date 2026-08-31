@@ -703,12 +703,12 @@ func (p *eventProcessor) handlePolicyDecision(ctx context.Context, req *pb.Polic
 		return
 	}
 
-	args := req.GetToolArgs()
-	call := ToolCall{
-		Name:       args.GetToolName(),
-		Args:       rawArgsOrEmpty(args.GetArgumentsJson()),
-		ServerName: args.GetServerName(),
-	}
+	// The harness sends the same PreToolArgs a pre-tool hook receives, so the
+	// call is built the same way: wire URIs translated to native paths, the
+	// canonical path derived from them, and the subagent tool under its SDK
+	// name. A predicate must not see a different call than a hook does, and a
+	// path-matching predicate that reads an empty CanonicalPath fails open.
+	call := toolCallFromArgs(req.GetToolArgs())
 
 	if policy.When != nil {
 		matched, err := policy.When(ctx, call)

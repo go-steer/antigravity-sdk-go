@@ -129,6 +129,11 @@ type ToolCall struct {
 	// CanonicalPath is the normalized filesystem path for file-related tools.
 	// The connection layer populates it from the wire URI so that policies can
 	// match on a platform-native absolute path.
+	//
+	// It is empty when the call carries no recognized path argument, which is
+	// the case for every non-file tool. A predicate that gates on a path must
+	// therefore treat the empty string as "no path to match" rather than as a
+	// path that fails its test.
 	CanonicalPath string
 	// ServerName names the MCP server owning this tool, when applicable.
 	ServerName string

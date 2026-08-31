@@ -101,3 +101,12 @@ in [`CONTRIBUTING.md`](./CONTRIBUTING.md).
   the harness nameless and failed the turn with `tModel: model is empty`. A
   nameless target whose types admit no single default is rejected by `New`
   instead of guessing.
+- Dynamic policy evaluation now receives the same `ToolCall` a pre-tool hook
+  does: `CanonicalPath` populated, wire `file:///` URIs rewritten to native
+  paths, the subagent tool under its SDK name, and `ID` / `StepID` filled in
+  when the harness supplies them. A `When` predicate that gated on
+  `CanonicalPath` previously saw an empty string and never matched, so
+  path-based deny and ask-user rules failed open. Ask-user handlers — including
+  `ConfirmInTerminal` — now show the native path and the SDK tool name too.
+- `ToolCall.CanonicalPath` is no longer erased by a later path argument that is
+  empty, for the same reason.

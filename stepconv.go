@@ -191,7 +191,9 @@ func rawArgsOrEmpty(s string) json.RawMessage {
 }
 
 // normalizeArgPaths rewrites wire URIs in the known path arguments to native
-// paths, and reports the last one it rewrote as the step's canonical path.
+// paths, and reports the last non-empty one it saw as the step's canonical
+// path. An empty path argument never displaces a real one: the canonical path
+// is what path-scoped policies match on, so losing it fails open.
 //
 // Arguments that are not a JSON object, or that contain no path keys, are
 // returned untouched.
@@ -216,7 +218,9 @@ func normalizeArgPaths(args json.RawMessage) (json.RawMessage, string) {
 			continue // not a string; leave it alone
 		}
 		normalized := wire.NormalizePath(s)
-		canonical = normalized
+		if normalized != "" {
+			canonical = normalized
+		}
 		if normalized != s {
 			encoded, err := json.Marshal(normalized)
 			if err != nil {
