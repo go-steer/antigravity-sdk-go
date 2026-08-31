@@ -47,13 +47,17 @@ jobs:
   apidiff:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # Tags and history: the baseline is `git describe`'s nearest
           # reachable v* tag, which a shallow clone cannot see.
           fetch-depth: 0
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
+          # Installs the `toolchain` line, and pins GOTOOLCHAIN=local. The
+          # baseline worktree is built with it too, so a very old tag whose
+          # `go` directive outranks it would fail here rather than silently
+          # fetching a second toolchain — see the note in ci.yml.
           go-version-file: go.mod
       - name: API diff since last release
         run: dev/ci/presubmits/verify-apidiff
