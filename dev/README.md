@@ -112,6 +112,13 @@ does not build. It is obtainable, though: Google ships it inside the published
 `GOOGLE_CLOUD_LOCATION` (Vertex uses Application Default Credentials). Without
 them the suite skips itself and says what is missing.
 
+The suite carries a `//go:build live` tag, so no default build compiles it —
+which would also mean no default build ever *type-checks* it, and an API
+rename would rot the live suite silently. `dev/tools/vet` therefore makes a
+second pass with `-tags live`. That is a compile check only; it starts no
+harness and spends no tokens, so it is safe in the presubmit sweep even though
+running the suite is not.
+
 It is not a required check, and should not become one: it costs money per run
 and can fail for reasons no PR caused. Run it before a release, and after any
 change to the wire layer — `internal/harness`, `harnessconfig.go`,

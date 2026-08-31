@@ -92,7 +92,8 @@ if [[ -z "$WHEEL" ]]; then
   exit 1
 fi
 
-# unzip -j flattens, -o overwrites: one member out, straight to DEST_DIR.
+# Extract the one member we want. Python rather than `unzip`, which is not
+# installed everywhere, and we already require an interpreter for pip.
 mkdir -p "$DEST_DIR"
 "$PY" -c '
 import sys, zipfile
@@ -105,11 +106,15 @@ with zipfile.ZipFile(sys.argv[1]) as z:
 ' "$WHEEL" "$DEST"
 
 chmod +x "$DEST"
-echo "$HARNESS_VERSION" > "$STAMP"
 
 # Prove it runs here before anyone depends on it. A wheel built for a libc
 # this host does not have would otherwise surface as an opaque exec failure
 # in the middle of a test run.
+#
+# Before the version stamp is written, not after: the stamp is what the
+# early-exit at the top trusts, so stamping a binary that failed this probe
+# would make the very next run print "already present" and skip straight past
+# the problem.
 #
 # Asserting on output, not exit status: the harness registers no --help flag,
 # so Go's flag package prints "Usage of ..." and exits 2. That 2 means the
@@ -123,4 +128,5 @@ if [[ "$probe" != Usage\ of* ]]; then
   exit 1
 fi
 
+echo "$HARNESS_VERSION" > "$STAMP"
 printf '  · harness %s ready (%s)\n' "$HARNESS_VERSION" "$DEST"

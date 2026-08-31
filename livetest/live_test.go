@@ -200,14 +200,14 @@ func TestCustomToolIsInvoked(t *testing.T) {
 
 	var (
 		mu     sync.Mutex
-		callID []string
+		cities []string
 	)
 	weather := antigravity.MustNewTool("get_weather",
 		"Returns the current weather for a city.",
 		func(_ context.Context, a args) (string, error) {
 			mu.Lock()
 			defer mu.Unlock()
-			callID = append(callID, a.City)
+			cities = append(cities, a.City)
 			return "It is 22C and sunny in " + a.City + ".", nil
 		})
 
@@ -226,15 +226,15 @@ func TestCustomToolIsInvoked(t *testing.T) {
 
 	mu.Lock()
 	defer mu.Unlock()
-	if len(callID) == 0 {
+	if len(cities) == 0 {
 		t.Fatalf("get_weather was never invoked; the model answered: %q", got)
 	}
 	// The argument has to survive schema generation and JSON decoding. Case
 	// and phrasing are the model's business, so match loosely.
-	if !strings.Contains(strings.ToLower(callID[0]), "dublin") {
-		t.Errorf("tool received city %q, want something containing \"dublin\"", callID[0])
+	if !strings.Contains(strings.ToLower(cities[0]), "dublin") {
+		t.Errorf("tool received city %q, want something containing \"dublin\"", cities[0])
 	}
-	t.Logf("tool invoked %d time(s), first city %q", len(callID), callID[0])
+	t.Logf("tool invoked %d time(s), first city %q", len(cities), cities[0])
 }
 
 // TestStructuredOutput checks the reflected JSON Schema round trip:
@@ -341,7 +341,7 @@ func TestDeniedToolIsNotExecuted(t *testing.T) {
 		Path string `json:"path" jsonschema:"description=The file to delete."`
 	}
 
-	var called atomicBool
+	var called guardedFlag
 	danger := antigravity.MustNewTool("delete_everything",
 		"Deletes a file from disk.",
 		func(_ context.Context, _ args) (string, error) {
@@ -349,6 +349,12 @@ func TestDeniedToolIsNotExecuted(t *testing.T) {
 			return "deleted", nil
 		})
 
+	// The explicit Deny is redundant under DenyAll, and deliberately so. What
+	// is under test is that a denial is enforced against a real harness and
+	// that the turn survives it — not that a specific rule outranks a broader
+	// one, which the unit suite already covers exhaustively. Proving precedence
+	// live would mean seating a real model on AllowAll, i.e. granting shell to
+	// something being actively prompted to delete a file. Not worth it here.
 	agent := newAgent(t,
 		antigravity.WithTools(danger),
 		antigravity.WithSystemPrompt("You delete files when asked, using the tool."),
@@ -398,20 +404,20 @@ func TestInvalidModelSurfacesError(t *testing.T) {
 	t.Logf("surfaced: %v", err)
 }
 
-// atomicBool is a mutex-guarded flag. The harness may call tools from its own
+// guardedFlag is a mutex-guarded flag. The harness may call tools from its own
 // goroutine, so the test's read has to be synchronized with the tool's write.
-type atomicBool struct {
+type guardedFlag struct {
 	mu sync.Mutex
 	v  bool
 }
 
-func (b *atomicBool) set() {
+func (b *guardedFlag) set() {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.v = true
 }
 
-func (b *atomicBool) get() bool {
+func (b *guardedFlag) get() bool {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return b.v
