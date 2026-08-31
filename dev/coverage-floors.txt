@@ -1,0 +1,20 @@
+# Per-package statement-coverage floors, enforced by
+# dev/tools/verify-coverage against the profile dev/tools/test-unit writes.
+#
+# Format: <import-path> <floor>   (one per line, # comments allowed)
+#
+# Every package in the profile needs an entry — a package with no floor is a
+# package no one is holding to anything, and the check fails rather than
+# letting it in unmeasured. Two trees are excluded from the profile instead
+# of being floored at 0: examples/ (package main, needs a live harness) and
+# internal/genproto (generated). See the header of dev/tools/verify-coverage.
+#
+# Floors sit a point under the measured number, so ordinary churn does not
+# turn an unrelated PR red. Lowering one is allowed, in the PR that makes it
+# necessary, with a comment saying why. Raising one is never required.
+
+github.com/go-steer/antigravity-sdk-go                            91.0
+github.com/go-steer/antigravity-sdk-go/internal/harness           83.0
+github.com/go-steer/antigravity-sdk-go/internal/schema            93.0
+github.com/go-steer/antigravity-sdk-go/internal/wire              80.0
+github.com/go-steer/antigravity-sdk-go/tracing                    98.0

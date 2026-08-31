@@ -1,0 +1,26 @@
+# Personal agent-session context — intentionally not checked in. The shared
+# instructions are AGENTS.md; the opt-in Claude Code config sample lives in
+# dev/claude/settings-review-gate.json (repo-native enforcement is AGENTS.md
+# + the required review-gate CI check, not committed harness settings).
+CLAUDE.md
+.claude/
+
+# Go build artifacts
+bin/
+dist/
+*.test
+*.out
+coverage.*
+
+# Built example binaries. dev/tools/build sends executables to a temp dir, but
+# a bare `go build ./...` in a module holding one `package main` drops the
+# binary in the working tree.
+/antigravity-sdk-go
+/pirate-math-mcp
+/examples/deep_dives/observability_otel/observability_otel
+
+# Editor / OS noise
+.idea/
+.vscode/
+*.swp
+.DS_Store
