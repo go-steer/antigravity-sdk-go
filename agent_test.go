@@ -19,6 +19,7 @@ import (
 	"errors"
 	"log/slog"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -75,6 +76,28 @@ func TestNewReportsAnUndiscoverableHarness(t *testing.T) {
 	_, err := New(t.Context(), WithPolicies(One(AllowAll())))
 	if !errors.Is(err, ErrHarnessNotFound) {
 		t.Fatalf("error = %v, want ErrHarnessNotFound", err)
+	}
+}
+
+// TestInitializeErrorReportsStderrOnce guards the presentation of the one error
+// most users will ever see from New. Both layers carry the harness's stderr, so
+// nesting them printed it twice and pushed the explanation off the top of the
+// message.
+func TestInitializeErrorReportsStderrOnce(t *testing.T) {
+	const stderr = "Failed to parse initial message"
+
+	err := initializeError(&harness.StartError{
+		Err:    errors.New("waiting for the initialize response: EOF"),
+		Stderr: stderr,
+	})
+	if !errors.Is(err, ErrConnection) {
+		t.Errorf("error = %v, want it to match ErrConnection", err)
+	}
+	if got := strings.Count(err.Error(), stderr); got != 1 {
+		t.Errorf("the harness stderr appears %d times in %q, want once", got, err)
+	}
+	if !strings.Contains(err.Error(), "waiting for the initialize response") {
+		t.Errorf("error = %q, want the underlying failure kept", err)
 	}
 }
 

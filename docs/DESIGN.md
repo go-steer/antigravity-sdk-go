@@ -111,6 +111,64 @@ Go's `protojson` deliberately emits unstable whitespace to discourage byte
 comparison of its output. Compare parsed messages with `protocmp.Transform()`,
 never raw JSON strings.
 
+### Harness protocol skew
+
+The `.proto` files under `proto/` are vendored from the Python repository's
+**main branch**, which runs ahead of the newest `localharness` binary on PyPI.
+The two are not versioned together and the handshake offers no way to tell them
+apart: `OutputConfig` carries a port and an API key, and no harness version, so
+the SDK cannot detect an old harness before it talks to one.
+
+When the SDK sends something the harness's own bindings do not define, the
+harness's protojson decoder rejects the **entire** message. One unknown enum
+name is enough to take down a whole config. The harness prints the parse error,
+exits, and the SDK sees an EOF where the `InitializeConversationResponse`
+should have been.
+
+**Current instance: `LIFECYCLE_HOOK_STOP`.** The vendored `LifecycleHook` enum
+defines it as `9`; localharness 0.1.15, the newest release, stops at
+`LIFECYCLE_HOOK_ON_COMPACTION = 8`. Registering a stop hook
+([`WithStopHook`](../options.go)) puts that name in `enabled_hooks`, so against
+0.1.15 the session dies at initialize:
+
+```
+antigravity: harness initialize failed: waiting for the initialize response: EOF
+harness protocol skew: the harness rejected the message because it does not
+understand the value "LIFECYCLE_HOOK_STOP" for field "enabledHooks", …
+harness stderr:
+Failed to parse initial message: proto: (line 1:1614): invalid value for enum
+field enabledHooks: "LIFECYCLE_HOOK_STOP"
+```
+
+The remedies are to upgrade the harness binary, or to stop using the feature
+that sets the value — here, to drop the stop hook. The Python SDK has the same
+problem for the same reason: `hooks.stop` exists on its main branch and not in
+the released 0.1.15 package.
+
+`internal/harness` detects this and says so, keying off the wording
+protobuf-go's decoder uses (`proto: (line L:C): invalid value for enum field …`
+and its unknown-field sibling) in the captured stderr, and wrapping the
+transport error in a `*ProtocolSkewError` that keeps both the original failure
+and the stderr in the chain. A failure with no such evidence is left alone
+rather than blamed on a version mismatch. Two details are load-bearing. The
+character after `proto:` is either a space or a non-breaking space: protobuf-go
+picks one from a hash of the executable, specifically to discourage this
+matching, so it is fixed for a given binary but varies between builds — 0.1.15
+emits the non-breaking one, and both are accepted. And the harness is killed and
+its stderr awaited to EOF, or 250 ms, whichever comes first, before the buffer is
+read, because it writes the explanation and exits at almost the same moment.
+
+The column in the parse error is wherever the offending value landed in the
+serialized config, so it shifts with the configuration; only the wording is
+matched.
+
+**Do not "fix" this by marshalling with
+`protojson.MarshalOptions{UseEnumNumbers: true}`.** An old harness would very
+likely tolerate the unknown number instead of dying — but Python sends enum
+names (`json_format.MessageToJson`), and parity beats taste. Diverging on the
+wire format to paper over a version skew trades a legible error for a silent
+behavioral difference from the reference implementation.
+
 ### Teardown
 
 Always kill the subprocess and drain stderr. Harness stderr is the only

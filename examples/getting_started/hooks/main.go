@@ -21,6 +21,11 @@
 // per-session scratchpad that lets one hook leave state for another.
 //
 //	go run ./examples/getting_started/hooks
+//
+// The stop hook needs a localharness newer than 0.1.15. Older binaries do not
+// define LIFECYCLE_HOOK_STOP, and reject the whole session config over it — see
+// "Harness protocol skew" in docs/DESIGN.md. Drop [antigravity.WithStopHook]
+// below to run the rest of this example against such a harness.
 package main
 
 import (
