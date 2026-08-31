@@ -78,6 +78,15 @@ in [`CONTRIBUTING.md`](./CONTRIBUTING.md).
 - `dev/tools/verify-coverage` + `dev/coverage-floors.txt`: a per-package floor
   that ratchets up. `examples/` and `internal/genproto` are excluded from
   measurement so the floors mean something for hand-written code.
+- `livetest/` + `dev/tools/fetch-harness` + `dev/tools/test-live`: an opt-in
+  end-to-end suite behind `//go:build live` that drives a real `localharness`
+  against a real model, plus the tooling to unpack that binary from the
+  published Python wheel. Everything else tests against the fake harness,
+  which never reads a schema it is sent and never calls a model. Not part of
+  `dev/tools/ci` — it costs money and can fail for reasons no change caused —
+  but `dev/tools/vet` type-checks it with `-tags live` so it cannot rot
+  unnoticed. `.github/workflows/live-e2e.yml` runs it weekly, on wire-layer
+  pushes to `main`, and on demand.
 - `docs/DESIGN.md`: the design of record — the client/harness split, the wire
   protocol and its two framings, the single-public-package rule and the
   three-module layout, and the parity details a port can break without failing

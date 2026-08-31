@@ -129,6 +129,36 @@ Everything in the default sweep still runs against the fake harness in
 WebSocket, with a scripted agent behind it. See
 [`docs/DESIGN.md`](../docs/DESIGN.md) §7.
 
+### The live-e2e workflow
+
+`.github/workflows/live-e2e.yml` runs the same `dev/tools/test-live` remotely,
+on three triggers that fail for different reasons: manual dispatch, a weekly
+schedule (drift originating upstream — a new harness, a retired model — which
+breaks us with no commit on our side), and pushes to `main` touching the wire
+layer (drift originating here). No `pull_request` trigger: fork PRs cannot see
+secrets, so it would be a wall to outside contributors rather than a gate. It
+is **not** a required check, and #4 tracks the open questions.
+
+It needs credentials it cannot provide itself — either a `GEMINI_API_KEY`
+secret, or Workload Identity Federation via `GCP_WORKLOAD_IDENTITY_PROVIDER` +
+`GCP_SERVICE_ACCOUNT` secrets and `GOOGLE_CLOUD_PROJECT` +
+`GOOGLE_CLOUD_LOCATION` variables. Until one exists it skips, and says so in
+the run summary rather than passing quietly.
+
+That distinction is the fiddly part and worth stating plainly. A Go test that
+skips itself leaves a **passing** package:
+
+```
+--- SKIP: TestSingleTurnText (0.00s)
+PASS
+ok  	github.com/go-steer/antigravity-sdk-go/livetest	0.007s
+```
+
+A workflow that just checked the exit status would report green for "the live
+suite passed" having run zero live turns — which is precisely the thing this
+workflow exists to rule out. So once credentials *are* detected, the job greps
+the output and fails on any `--- SKIP`, and fails again if no test passed.
+
 ### Harness version skew
 
 The `.proto` this repo vendors is ahead of the newest published harness. The
