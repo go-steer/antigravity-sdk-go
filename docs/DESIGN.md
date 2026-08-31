@@ -292,6 +292,25 @@ This is also why `tracing/` does not register a pre-tool-call hook (§4).
   settings and `GEMINI_API_KEY` alike.
 - **`chat()` rejects nil, empty, and whitespace-only prompts**, including a
   sequence whose elements are all blank strings.
+- **A nameless `ModelTarget` takes the package default for its modality.**
+  This is a **deliberate divergence**, and the one place a port should not copy
+  Python. Python's `ModelTarget.name` is optional and never defaulted
+  (`models.py`: `name: str | None = None`); `build_models_proto` sends
+  `m.name or ""` (`local_connection.py`); and `_merge_models_list` keys the
+  default-model fallback on `types` alone, so a nameless explicit target
+  suppresses the default for its type. `models=[ModelTarget(endpoint=…)]` in
+  Python would therefore hand the harness an empty model name and die mid-turn
+  with `tModel: model is empty`. No Python caller trips over it in practice
+  only because nobody writes that: `prioritized_inference.py` reaches for
+  `LocalAgentConfig(endpoint=…)` instead — a field that does not exist on
+  `LocalAgentConfig` or `AgentConfig`, so pydantic's default `extra="ignore"`
+  drops it, silently discarding the service tier the example demonstrates.
+
+  Go has no `endpoint` config field; endpoint selection lives on the target, so
+  a nameless target is the natural way to say "the default model, on this
+  endpoint" and has to work. Where the types admit no single default — both
+  modalities on one target — `ModelTarget.validate` rejects it at `New` rather
+  than guessing.
 
 ### Turn completion and the event queue
 

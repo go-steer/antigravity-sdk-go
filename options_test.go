@@ -334,6 +334,103 @@ func TestResolveModelsKeepsAnExplicitEndpoint(t *testing.T) {
 	t.Error("the configured model is missing from the resolved set")
 }
 
+// TestResolveModelsNamesAnEndpointOnlyTarget covers the target a caller writes
+// to change the endpoint and nothing else — selecting a service tier or a base
+// URL, as examples/getting_started/prioritized_inference does. Such a target
+// already covers its modality, so the package default is not appended behind
+// it; leaving its name empty sent the harness a nameless model and killed the
+// turn with "tModel: model is empty".
+func TestResolveModelsNamesAnEndpointOnlyTarget(t *testing.T) {
+	tests := []struct {
+		name     string
+		types    []ModelType
+		wantName string
+		wantType ModelType
+	}{
+		{name: "implicitly text", wantName: DefaultModel, wantType: ModelTypeText},
+		{
+			name:     "text",
+			types:    []ModelType{ModelTypeText},
+			wantName: DefaultModel,
+			wantType: ModelTypeText,
+		},
+		{
+			name:     "image",
+			types:    []ModelType{ModelTypeImage},
+			wantName: DefaultImageGenerationModel,
+			wantType: ModelTypeImage,
+		},
+		{
+			// A repeated type is redundant, not ambiguous.
+			name:     "text twice",
+			types:    []ModelType{ModelTypeText, ModelTypeText},
+			wantName: DefaultModel,
+			wantType: ModelTypeText,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			endpoint := &GeminiAPIEndpoint{
+				APIKey:  "explicit",
+				Options: &GeminiModelOptions{ServiceTier: ServiceTierPriority},
+			}
+			c := mustResolve(t, WithModels(ModelTarget{Types: tc.types, Endpoint: endpoint}))
+
+			var got []ModelTarget
+			for _, m := range c.models {
+				if m.Name == "" {
+					t.Errorf("resolved model %+v has no name", m)
+				}
+				if slices.Contains(m.modelTypes(), tc.wantType) {
+					got = append(got, m)
+				}
+			}
+			if len(got) != 1 {
+				t.Fatalf("%s models = %+v, want exactly the caller's target", tc.wantType, got)
+			}
+			if got[0].Name != tc.wantName {
+				t.Errorf("name = %q, want the package default %q", got[0].Name, tc.wantName)
+			}
+			// Defaulting the name must not cost the caller their endpoint:
+			// the whole point of the target is the options it carries.
+			if got[0].Endpoint != endpoint {
+				t.Errorf("endpoint = %v, want the one the caller supplied", got[0].Endpoint)
+			}
+		})
+	}
+}
+
+// TestResolveModelsRejectsAnAmbiguousNamelessTarget covers the cases
+// defaulting cannot resolve: a target claiming both modalities has two package
+// defaults to choose from and a target claiming an unknown modality has none.
+// Both are rejected at construction rather than mid-turn.
+func TestResolveModelsRejectsAnAmbiguousNamelessTarget(t *testing.T) {
+	tests := []struct {
+		name  string
+		types []ModelType
+	}{
+		{name: "both modalities", types: []ModelType{ModelTypeText, ModelTypeImage}},
+		{name: "unknown modality", types: []ModelType{ModelType("video")}},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := resolved(t, WithModels(ModelTarget{
+				Types:    tc.types,
+				Endpoint: &GeminiAPIEndpoint{APIKey: "explicit"},
+			}))
+			if err == nil {
+				t.Fatalf("a nameless target for %v was accepted", tc.types)
+			}
+			assertConfigField(t, err, "models")
+			if !strings.Contains(err.Error(), "ModelTarget.Name") {
+				t.Errorf("error = %q, want it to name the remedy", err)
+			}
+		})
+	}
+}
+
 func TestResolveModelsUsesVertexWhenSelected(t *testing.T) {
 	c := mustResolve(t, WithVertex("my-project", "us-central1"))
 

@@ -91,3 +91,13 @@ in [`CONTRIBUTING.md`](./CONTRIBUTING.md).
   protocol and its two framings, the single-public-package rule and the
   three-module layout, and the parity details a port can break without failing
   to compile.
+
+### Fixed
+
+- `New` now defaults an unnamed `WithModels` target to `DefaultModel` or
+  `DefaultImageGenerationModel` according to its `Types`. A target that exists
+  only to carry an endpoint — selecting a service tier, as
+  `examples/getting_started/prioritized_inference` does — previously reached
+  the harness nameless and failed the turn with `tModel: model is empty`. A
+  nameless target whose types admit no single default is rejected by `New`
+  instead of guessing.
