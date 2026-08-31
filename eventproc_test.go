@@ -22,6 +22,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/go-cmp/cmp"
 	"google.golang.org/protobuf/proto"
 
 	pb "github.com/go-steer/antigravity-sdk-go/internal/genproto/google/antigravity/proto"
@@ -541,6 +542,94 @@ func TestPolicyDecisionPredicateOutcomes(t *testing.T) {
 			}
 			if tt.reason != "" && !strings.Contains(got.GetDenyReason(), tt.reason) {
 				t.Errorf("reason = %q, want it to mention %q", got.GetDenyReason(), tt.reason)
+			}
+		})
+	}
+}
+
+// TestPolicyDecisionCallMatchesTheHookView pins the shape of the [ToolCall] a
+// dynamic policy sees. It used to be built by hand from the raw wire fields, so
+// a predicate got an empty CanonicalPath and file:/// arguments while a pre-tool
+// hook watching the same call got both normalized. A path-based rule therefore
+// matched nothing and failed open, which is the interesting direction for a
+// deny.
+func TestPolicyDecisionCallMatchesTheHookView(t *testing.T) {
+	tests := []struct {
+		name string
+		// wireTool is the name the harness uses; wantName is the SDK's, which
+		// is also what a caller targets the policy with.
+		wireTool string
+		args     string
+		wantName string
+		wantPath string
+		wantArgs map[string]any
+	}{
+		{
+			name:     "a file tool carries its canonical path and native arguments",
+			wireTool: "create_file",
+			args:     `{"TargetFile":"file:///tmp/secrets/production.key","CodeContent":"debug=true\n"}`,
+			wantName: "create_file",
+			wantPath: "/tmp/secrets/production.key",
+			wantArgs: map[string]any{
+				"TargetFile":  "/tmp/secrets/production.key",
+				"CodeContent": "debug=true\n",
+			},
+		},
+		{
+			// The wire name reaches hooks translated; a predicate written
+			// against the SDK's tool constants must see the same one.
+			name:     "the subagent tool arrives under its SDK name",
+			wireTool: "invoke_subagent",
+			args:     `{}`,
+			wantName: string(ToolStartSubagent),
+			wantPath: "",
+			wantArgs: map[string]any{},
+		},
+		{
+			// No path argument means no path to match, not a stale one.
+			name:     "a tool with no path argument has no canonical path",
+			wireTool: "run_command",
+			args:     `{"command_line":"ls"}`,
+			wantName: "run_command",
+			wantPath: "",
+			wantArgs: map[string]any{"command_line": "ls"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var seen ToolCall
+			s := policySession(t, Policy{
+				Tool:     tt.wantName,
+				Decision: DecisionDeny,
+				When: func(_ context.Context, call ToolCall) (bool, error) {
+					seen = call
+					return true, nil
+				},
+			})
+
+			s.pushPolicyRequest("req-1", "rule_0", tt.wireTool, tt.args)
+
+			// Waiting for the answer orders the predicate's write before the
+			// reads below.
+			if got := waitSent(t, s.fake).GetPolicyDecisionResponse().GetOutcome(); got != pb.PolicyEvaluationOutcome_POLICY_EVALUATION_OUTCOME_DENY {
+				t.Fatalf("outcome = %v, want DENY", got)
+			}
+
+			if seen.Name != tt.wantName {
+				t.Errorf("Name = %q, want %q", seen.Name, tt.wantName)
+			}
+			if seen.CanonicalPath != tt.wantPath {
+				t.Errorf("CanonicalPath = %q, want %q", seen.CanonicalPath, tt.wantPath)
+			}
+			var gotArgs map[string]any
+			if err := json.Unmarshal(seen.Args, &gotArgs); err != nil {
+				t.Fatalf("the predicate's arguments do not parse: %v", err)
+			}
+			// cmp rather than maps.Equal: the table is meant to grow, and a
+			// nested argument would make == panic rather than fail.
+			if diff := cmp.Diff(tt.wantArgs, gotArgs); diff != "" {
+				t.Errorf("Args mismatch (-want +got):\n%s", diff)
 			}
 		})
 	}

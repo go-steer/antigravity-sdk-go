@@ -191,8 +191,10 @@ func (p *eventProcessor) hookStop(ctx context.Context, args *pb.StopArgs) *pb.Ca
 // Wire conversions
 // ---------------------------------------------------------------------------
 
-// toolCallFromArgs rebuilds a [ToolCall] from a pre-tool request, translating
-// wire URIs so hooks see native paths.
+// toolCallFromArgs rebuilds a [ToolCall] from the PreToolArgs the harness
+// sends, translating wire URIs so hooks see native paths. Dynamic policy
+// decisions carry the same message and are built here too, so a predicate and
+// a pre-tool hook watching one call cannot see two different calls.
 func toolCallFromArgs(args *pb.PreToolArgs) ToolCall {
 	raw := rawArgsOrEmpty(args.GetArgumentsJson())
 	normalized, canonical := normalizeArgPaths(raw)
