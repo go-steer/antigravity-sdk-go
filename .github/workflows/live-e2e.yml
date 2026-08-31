@@ -1,0 +1,187 @@
+# Copyright 2026 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# The live end-to-end UAT: a real `localharness` binary, a real model, real
+# tokens. Everything else in CI runs against the fake harness in
+# internal/harness, which does a real handshake over a real socket but never
+# reads a schema it is sent and never calls a model. This is the only thing
+# here that can catch us disagreeing with the actual harness.
+#
+# Deliberately NOT a required check, and deliberately not on `pull_request`:
+#
+#   - It spends money on every run.
+#   - It can go red for a quota, a backend outage or a retired model — none of
+#     which any PR caused. A required check that fails on a datacenter hiccup
+#     is one people learn to click past, and then it protects nothing.
+#   - Fork PRs cannot see secrets, so as a required check it would be a wall
+#     to outside contributors rather than a gate.
+#
+# Cadence is three triggers that fail for different reasons; see #4 for the
+# full argument and for what is still open.
+name: live-e2e
+on:
+  workflow_dispatch:
+    inputs:
+      run_filter:
+        description: "Optional -run regexp to narrow the suite"
+        required: false
+        type: string
+  schedule:
+    # Mondays 06:00 UTC. Weekly rather than nightly because the point of the
+    # clock trigger is drift that originates *upstream* — a new harness
+    # release, a retired model — which breaks us with no commit on our side
+    # and which nothing else in CI would notice. Start cheap; promote to
+    # nightly once there is enough history to know the real flake rate.
+    # Loosening a check people have already started ignoring is much harder
+    # than tightening one they trust.
+    - cron: "0 6 * * 1"
+  push:
+    branches: [main]
+    # Drift that originates *here*, caught at about the moment it lands. This
+    # is the wire layer: everything that decides what bytes the harness sees.
+    # Keep in step with the list in dev/tools/test-live.
+    paths:
+      - "internal/harness/**"
+      - "harnessconfig.go"
+      - "stepconv.go"
+      - "eventproc.go"
+      - "livetest/**"
+      - "dev/tools/fetch-harness"
+      - "dev/tools/test-live"
+      - ".github/workflows/live-e2e.yml"
+
+concurrency:
+  # No cancel-in-progress: a half-run live suite has already spent the money,
+  # and killing it teaches us nothing. Let it finish and queue the next.
+  group: live-e2e
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  # For Workload Identity Federation. Harmless when the WIF path is not
+  # configured, and required for it to work at all when it is.
+  id-token: write
+
+jobs:
+  live-e2e:
+    runs-on: ubuntu-latest
+    # Generous: real turns are slow, and the suite's own per-test bound is 3
+    # minutes. This is the backstop against a wedged harness burning an hour.
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      # Which auth path, if any, is configured. Secrets are not readable from
+      # a job-level `if`, so the decision has to happen in a step — and it is
+      # written to the run summary either way, because the failure mode worth
+      # designing against is a scheduled job that quietly passes green for
+      # months while testing nothing at all.
+      - name: Detect credentials
+        id: creds
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          WIF_PROVIDER: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          WIF_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+          GCP_PROJECT: ${{ vars.GOOGLE_CLOUD_PROJECT }}
+        run: |
+          set -euo pipefail
+          mode=none
+          if [[ -n "$WIF_PROVIDER" && -n "$WIF_SERVICE_ACCOUNT" && -n "$GCP_PROJECT" ]]; then
+            mode=vertex
+          elif [[ -n "$GEMINI_API_KEY" ]]; then
+            mode=apikey
+          fi
+          echo "mode=$mode" >> "$GITHUB_OUTPUT"
+          {
+            echo "## Live end-to-end UAT"
+            echo
+            case "$mode" in
+              vertex) echo "Auth: **Vertex / Workload Identity Federation**." ;;
+              apikey) echo "Auth: **Gemini Developer API key**." ;;
+              none)
+                echo "**Skipped — no credentials configured.**"
+                echo
+                echo "This workflow cannot authenticate, so it did not run a"
+                echo "single live turn. Configure one of:"
+                echo
+                echo "- \`GCP_WORKLOAD_IDENTITY_PROVIDER\` + \`GCP_SERVICE_ACCOUNT\`"
+                echo "  secrets and \`GOOGLE_CLOUD_PROJECT\` +"
+                echo "  \`GOOGLE_CLOUD_LOCATION\` variables (preferred — no"
+                echo "  long-lived credential)."
+                echo "- a \`GEMINI_API_KEY\` secret (simpler, but a standing"
+                echo "  credential on a public repo)."
+                echo
+                echo "See #4."
+                ;;
+            esac
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Authenticate to Google Cloud
+        if: steps.creds.outputs.mode == 'vertex'
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      # dev/tools/test-live fetches the harness itself, but doing it as its own
+      # step keeps a 120 MB download from being reported as a test failure.
+      - name: Fetch localharness
+        if: steps.creds.outputs.mode != 'none'
+        run: dev/tools/fetch-harness
+
+      - name: Run the live suite
+        if: steps.creds.outputs.mode != 'none'
+        env:
+          GEMINI_API_KEY: ${{ steps.creds.outputs.mode == 'apikey' && secrets.GEMINI_API_KEY || '' }}
+          GOOGLE_GENAI_USE_VERTEXAI: ${{ steps.creds.outputs.mode == 'vertex' && 'true' || '' }}
+          GOOGLE_CLOUD_PROJECT: ${{ vars.GOOGLE_CLOUD_PROJECT }}
+          GOOGLE_CLOUD_LOCATION: ${{ vars.GOOGLE_CLOUD_LOCATION }}
+          MODE: ${{ steps.creds.outputs.mode }}
+          # Via the environment, never interpolated into the script body: a
+          # workflow_dispatch input is attacker-controlled text as far as this
+          # shell is concerned, and `${{ }}` splices it in before bash ever
+          # sees a quote.
+          RUN_FILTER: ${{ inputs.run_filter }}
+        run: |
+          set -euo pipefail
+          if [[ -n "${RUN_FILTER:-}" ]]; then
+            dev/tools/test-live -run "$RUN_FILTER" 2>&1 | tee /tmp/live.log
+          else
+            dev/tools/test-live 2>&1 | tee /tmp/live.log
+          fi
+
+          # The suite skips itself when it cannot find a harness or usable
+          # credentials, and a skipped Go test is a *passing* package. That
+          # would surface here as a green job meaning "the live suite passed"
+          # when in fact not one turn ran — the exact failure this workflow
+          # exists to rule out. So treat a skip as a failure: by this point
+          # credentials were detected, so a skip means something is wrong with
+          # them, not that the run was legitimately unnecessary.
+          if grep -q -- '--- SKIP' /tmp/live.log; then
+            echo "::error::The live suite skipped itself despite auth mode '$MODE'." \
+              "Credentials were detected but the suite could not use them."
+            grep -- '--- SKIP' /tmp/live.log >&2
+            exit 1
+          fi
+
+          passed="$(grep -c -- '--- PASS' /tmp/live.log || true)"
+          if [[ "$passed" -eq 0 ]]; then
+            echo "::error::The live suite reported no passing tests." >&2
+            exit 1
+          fi
+          echo "Ran **$passed** live test(s) against a real harness." >> "$GITHUB_STEP_SUMMARY"
