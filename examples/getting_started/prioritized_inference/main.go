@@ -41,7 +41,11 @@ func main() {
 
 func run(ctx context.Context) error {
 	// The tier is a property of the endpoint, so the model target has to be
-	// spelled out rather than left to WithModel.
+	// spelled out rather than left to WithModel. Leaving Name empty takes
+	// antigravity.DefaultModel, tracking whatever the SDK default becomes.
+	//
+	// Only the text model is configured here, so the image model the SDK adds
+	// alongside it runs on a plain endpoint at the standard tier.
 	agent, err := antigravity.New(ctx, antigravity.WithModels(antigravity.ModelTarget{
 		Endpoint: &antigravity.GeminiAPIEndpoint{
 			Options: &antigravity.GeminiModelOptions{

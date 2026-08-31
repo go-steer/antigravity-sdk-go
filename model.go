@@ -166,7 +166,11 @@ func (e *VertexEndpoint) Validate() error {
 
 // ModelTarget configures a single model and the endpoint that serves it.
 type ModelTarget struct {
-	// Name is the model identifier, such as "gemini-3.7-flash".
+	// Name is the model identifier, such as "gemini-3.7-flash". When empty it
+	// defaults to [DefaultModel] or [DefaultImageGenerationModel] according to
+	// Types, so a target may carry nothing but an [Endpoint]. Types with no
+	// single default between them — both modalities at once, or a [ModelType]
+	// this build does not know — make an empty Name a configuration error.
 	Name string
 	// Types declares what the model is used for. Defaults to text.
 	Types []ModelType
@@ -175,6 +179,16 @@ type ModelTarget struct {
 }
 
 func (m *ModelTarget) validate() error {
+	if m.Name == "" {
+		// resolveModels has already applied defaultName by the time a target
+		// reaches here, so an empty name means the types had no single default
+		// to fall back on. Failing here beats letting the harness fail the
+		// turn with "tModel: model is empty".
+		return fmt.Errorf(
+			"a model target declaring %v has no name and no single package default to fall back on: "+
+				"set ModelTarget.Name explicitly",
+			m.modelTypes())
+	}
 	if m.Endpoint == nil {
 		return fmt.Errorf("model %q must have an endpoint configured", m.Name)
 	}
@@ -182,6 +196,31 @@ func (m *ModelTarget) validate() error {
 		return fmt.Errorf("model %q: %w", m.Name, err)
 	}
 	return nil
+}
+
+// defaultName returns the package default model name for the target's declared
+// types, or "" when they do not agree on one: a target claiming both
+// modalities has [DefaultModel] and [DefaultImageGenerationModel] to choose
+// between, and a [ModelType] this build does not know has neither. Repeating
+// one type is not ambiguous and resolves normally.
+func (m *ModelTarget) defaultName() string {
+	name := ""
+	for _, t := range m.modelTypes() {
+		var candidate string
+		switch t {
+		case ModelTypeText:
+			candidate = DefaultModel
+		case ModelTypeImage:
+			candidate = DefaultImageGenerationModel
+		default:
+			return ""
+		}
+		if name != "" && name != candidate {
+			return ""
+		}
+		name = candidate
+	}
+	return name
 }
 
 // modelTypes returns the model's declared types, defaulting to text.

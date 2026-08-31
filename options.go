@@ -291,10 +291,18 @@ func WithModel(name string) Option {
 
 // WithModels configures model targets explicitly, each with its own endpoint.
 // A target with no endpoint inherits the one built from [WithAPIKey] or
-// [WithVertex].
+// [WithVertex]; a target with no name takes [DefaultModel] or
+// [DefaultImageGenerationModel] according to its [ModelTarget.Types], so
+// ModelTarget{Endpoint: …} means "the default model, served by this endpoint".
+// A nameless target whose types have no single default — both modalities at
+// once — is an error rather than a guess.
 //
 // Targets for a modality that is not configured — text or image — fall back to
-// the package defaults.
+// the package defaults, on the endpoint the shorthand options describe rather
+// than on any endpoint named here.
+//
+// [WithModel] is not merged into these targets: it appends one of its own, so
+// combining the two yields two text models, as it does in the Python SDK.
 func WithModels(models ...ModelTarget) Option {
 	return func(c *config) { c.models = append(c.models, models...) }
 }
@@ -606,6 +614,17 @@ func (c *config) resolveAppDataDir() error {
 // Explicit targets win; the shorthand adds one more; defaults fill in only the
 // modalities nobody covered, so an agent always has both a text and an image
 // model even when the caller named just one.
+//
+// A target that names no model gets the package default for its modality, so
+// it can say "whatever the default model is, but on this endpoint" — which is
+// what selecting a service tier takes, the tier being a property of the
+// endpoint. Naming [DefaultModel] explicitly says something subtly different:
+// it pins today's default rather than tracking it.
+//
+// Without the defaulting the nameless target would still cover its modality,
+// suppress the default appended below, and reach the harness with an empty
+// name, which the harness rejects mid-turn with "tModel: model is empty". See
+// docs/DESIGN.md §6 — this is a deliberate divergence from the Python SDK.
 func (c *config) resolveModels() error {
 	merged := slices.Clone(c.models)
 	if c.model != "" {
@@ -616,6 +635,9 @@ func (c *config) resolveModels() error {
 	for i := range merged {
 		if merged[i].Endpoint == nil {
 			merged[i].Endpoint = c.newEndpoint()
+		}
+		if merged[i].Name == "" {
+			merged[i].Name = merged[i].defaultName()
 		}
 		for _, t := range merged[i].modelTypes() {
 			covered[t] = true
