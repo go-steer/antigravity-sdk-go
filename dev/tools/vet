@@ -18,3 +18,15 @@ set -euo pipefail
 . "$(dirname "$0")/common.sh"
 cd "$(repo_root)"
 for_each_module vet go vet ./...
+
+# Again over the root module with the `live` tag, which is the only way
+# anything ever compiles livetest/. That suite is excluded from the default
+# build by design — it needs a harness binary and credentials — but exclusion
+# from the build is also exclusion from every compile error. Verified: break a
+# symbol in live_test.go and plain `go vet ./livetest/` still exits 0, because
+# the only file it compiled was the untagged doc stub. An API rename would
+# leave the live suite broken and silent until someone ran it months later.
+#
+# Type-checking only; nothing here starts a harness or spends a token.
+printf '  · vet (. , -tags live)\n'
+go vet -tags live ./...

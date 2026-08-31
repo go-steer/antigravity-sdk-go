@@ -342,6 +342,16 @@ Tests run against a fake harness that performs the real handshake and serves
 scripted events over a local WebSocket, so no `localharness` binary is needed
 to run the suite.
 
+There is also an opt-in end-to-end suite that drives a real harness against a
+real model backend. It is not part of the presubmit sweep — it needs
+credentials and costs money per run — but it is one command:
+
+```sh
+dev/tools/test-live        # fetches the harness, then runs livetest/
+```
+
+See [`dev/README.md`](dev/README.md#live-testing).
+
 ## Documentation
 
 - [`docs/DESIGN.md`](docs/DESIGN.md) — the design of record: the client/harness

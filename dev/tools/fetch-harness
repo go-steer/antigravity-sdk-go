@@ -1,0 +1,132 @@
+#!/usr/bin/env bash
+# Copyright 2026 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Fetch the precompiled `localharness` binary that the live test suite drives.
+#
+# This repo does not build the harness — the agentic loop is a Go binary
+# Google ships prebuilt, and the only public distribution channel is the
+# `google-antigravity` Python wheel, which carries the platform-appropriate
+# executable at google/antigravity/bin/localharness. So: download the wheel
+# for this host, unzip one file out of it, and drop it in a gitignored
+# working directory.
+#
+# The wheel is platform-tagged, and `pip download` resolves the right one
+# for the interpreter it runs under. On a platform Google does not publish a
+# wheel for, pip fails with "no matching distribution" and so does this — a
+# clear error, which is the correct outcome, since there is no harness to
+# test against there either.
+#
+# Usage:
+#   dev/tools/fetch-harness            # no-op if already present
+#   dev/tools/fetch-harness --force    # re-download over an existing copy
+#   dev/tools/fetch-harness --print    # print the path and exit
+set -euo pipefail
+. "$(dirname "$0")/common.sh"
+
+cd "$(repo_root)"
+
+# Pinned deliberately. The harness and the SDK share a wire protocol, and an
+# unpinned "latest" would turn an upstream protocol change into a live-test
+# failure on an unrelated PR. Bump this in the same commit that adapts the
+# SDK to a new harness, so `git log` records which harness a change was
+# verified against.
+HARNESS_VERSION="0.1.15"
+
+# Gitignored — a 120 MB binary is not a repo artifact.
+DEST_DIR="dev/.harness"
+DEST="$DEST_DIR/localharness"
+STAMP="$DEST_DIR/version"
+
+FORCE=0
+for arg in "$@"; do
+  case "$arg" in
+    --force) FORCE=1 ;;
+    --print) echo "$(repo_root)/$DEST"; exit 0 ;;
+    -h|--help)
+      echo "Usage: dev/tools/fetch-harness [--force|--print]"
+      exit 0
+      ;;
+    *)
+      echo "Unknown flag: $arg" >&2
+      exit 2
+      ;;
+  esac
+done
+
+# Re-fetch when the pin moves, not just when the file is missing: bumping
+# HARNESS_VERSION above has to actually change what is on disk, or the live
+# suite would keep testing against the old harness and report green.
+if [[ $FORCE -eq 0 && -x "$DEST" && -f "$STAMP" && "$(cat "$STAMP")" == "$HARNESS_VERSION" ]]; then
+  printf '  · harness %s already present (%s)\n' "$HARNESS_VERSION" "$DEST"
+  exit 0
+fi
+
+PY="${PYTHON:-python3}"
+if ! command -v "$PY" >/dev/null 2>&1; then
+  echo "fetch-harness: need $PY on PATH to download the wheel (set PYTHON= to override)" >&2
+  exit 1
+fi
+
+WORKDIR="$(mktemp -d)"
+trap 'rm -rf "$WORKDIR"' EXIT
+
+printf '  · downloading google-antigravity==%s\n' "$HARNESS_VERSION"
+"$PY" -m pip download "google-antigravity==$HARNESS_VERSION" \
+  --no-deps --quiet --dest "$WORKDIR"
+
+WHEEL="$(find "$WORKDIR" -name '*.whl' -print -quit)"
+if [[ -z "$WHEEL" ]]; then
+  echo "fetch-harness: pip downloaded no wheel for this platform" >&2
+  exit 1
+fi
+
+# Extract the one member we want. Python rather than `unzip`, which is not
+# installed everywhere, and we already require an interpreter for pip.
+mkdir -p "$DEST_DIR"
+"$PY" -c '
+import sys, zipfile
+member = "google/antigravity/bin/localharness"
+with zipfile.ZipFile(sys.argv[1]) as z:
+    if member not in z.namelist():
+        sys.exit(f"wheel does not contain {member}")
+    with z.open(member) as src, open(sys.argv[2], "wb") as dst:
+        dst.write(src.read())
+' "$WHEEL" "$DEST"
+
+chmod +x "$DEST"
+
+# Prove it runs here before anyone depends on it. A wheel built for a libc
+# this host does not have would otherwise surface as an opaque exec failure
+# in the middle of a test run.
+#
+# Before the version stamp is written, not after: the stamp is what the
+# early-exit at the top trusts, so stamping a binary that failed this probe
+# would make the very next run print "already present" and skip straight past
+# the problem.
+#
+# Asserting on output, not exit status: the harness registers no --help flag,
+# so Go's flag package prints "Usage of ..." and exits 2. That 2 means the
+# binary ran, which is the whole question here; a status check would read it
+# as failure. Captured to a variable rather than piped to grep, because
+# `set -o pipefail` would hand us the harness's 2 no matter what grep said.
+probe="$("$DEST" --help 2>&1 || true)"
+if [[ "$probe" != Usage\ of* ]]; then
+  echo "fetch-harness: $DEST downloaded but will not execute on this host" >&2
+  echo "  output: ${probe:-<none>}" >&2
+  exit 1
+fi
+
+echo "$HARNESS_VERSION" > "$STAMP"
+printf '  · harness %s ready (%s)\n' "$HARNESS_VERSION" "$DEST"

@@ -19,6 +19,11 @@ coverage.*
 /pirate-math-mcp
 /examples/deep_dives/observability_otel/observability_otel
 
+# The precompiled localharness binary that dev/tools/fetch-harness unpacks
+# from the published Python wheel for the live suite. 120 MB, platform
+# specific, and reproducible from the version pinned in that script.
+/dev/.harness/
+
 # Editor / OS noise
 .idea/
 .vscode/
