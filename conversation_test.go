@@ -243,6 +243,24 @@ func TestConversationRecordsHistoryAcrossTurns(t *testing.T) {
 	}
 }
 
+func TestStepsOpensTheIdleGateItself(t *testing.T) {
+	s := newSession(t)
+	s.proc.markRunning()
+
+	// The read loop queues the idle marker and only then opens the gate, so a
+	// reader can reach the marker while the turn still looks like it is
+	// running. Queuing without marking reproduces that window exactly.
+	s.proc.steps <- stepEvent{idle: true}
+
+	if _, err := collect(t, s.Conversation); err != nil {
+		t.Fatal(err)
+	}
+	if !s.proc.isIdle() {
+		t.Error("iteration ended with the turn still marked running; " +
+			"the next Send would see an empty queue and drain until its context died")
+	}
+}
+
 func TestConversationTrimsHistoryToTheCap(t *testing.T) {
 	c := newConversation(newEventProcessor(harness.NewFakeTransport(), nil, nil, newHookRunner(), nil), nil, 3)
 
