@@ -200,6 +200,13 @@ Bump deliberately — new linter releases can introduce findings that block CI.
 When you bump golangci-lint, run `dev/tools/lint-go` locally first to fix
 anything new before pushing.
 
+The workflows pin `actions/checkout@v7` and `actions/setup-go@v7`. The
+setup-go major matters: since v6 it installs the `toolchain` directive rather
+than the `go` directive and sets `GOTOOLCHAIN=local`, so CI runs on the pinned
+toolchain and no `go` command silently fetches another. A module that raised
+its `go` directive above the pinned toolchain would fail loudly instead —
+which is the behavior we want.
+
 ## Regenerating protobuf bindings
 
 Not a CI step: the bindings are checked in, and `buf` is not installed in CI.

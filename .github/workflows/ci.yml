@@ -43,12 +43,16 @@ jobs:
       # dev/tools/ci, so the local sweep can't drift from this one.
       ANTIGRAVITY_CI_SKIP: apidiff
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           # The root module's `go` directive is the floor consumers need
-          # (1.24), not what this repo builds with. GOTOOLCHAIN then
-          # fetches the pinned toolchain from the same file.
+          # (1.24), not what this repo builds with — so what gets installed
+          # is the `toolchain` line from the same file, which setup-go has
+          # preferred over the `go` directive since v6. That is also why v6
+          # sets GOTOOLCHAIN=local: the right toolchain is already here, and
+          # no `go` command should quietly fetch another one. All three
+          # modules pin the same toolchain, so the whole sweep runs on it.
           go-version-file: go.mod
       - name: presubmits (dev/tools/ci)
         run: dev/tools/ci
