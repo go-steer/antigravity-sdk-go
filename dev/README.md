@@ -94,14 +94,39 @@ That's it. The `ci` workflow runs `dev/tools/ci`, so a new step is picked up
 without touching any YAML — the delegator exists so the step can also be run
 on its own, and so nothing in a workflow ever has to know what a check does.
 
-## No smoke test, deliberately
+## Live testing
 
-There is no step that runs an agent. The agentic loop lives in a precompiled
-`localharness` binary that this repository does not ship and CI cannot obtain,
-so everything touching the transport runs against the fake harness in
-`internal/harness` instead — a real subprocess doing the real handshake over a
-real WebSocket, with a scripted agent behind it. See
+No step in `dev/tools/ci` runs a real agent, but one exists outside it.
+
+The agentic loop lives in a precompiled `localharness` binary this repository
+does not build. It is obtainable, though: Google ships it inside the published
+`google-antigravity` Python wheel, at `google/antigravity/bin/localharness`.
+
+| Command | What it does |
+| --- | --- |
+| `dev/tools/fetch-harness` | Downloads the pinned wheel and unpacks the binary to `dev/.harness/` (gitignored). |
+| `dev/tools/test-live` | Fetches the harness, then runs the `live`-tagged suite in [`livetest/`](../livetest) against it. |
+
+`test-live` needs credentials — either `GEMINI_API_KEY`, or
+`GOOGLE_GENAI_USE_VERTEXAI=true` with `GOOGLE_CLOUD_PROJECT` and
+`GOOGLE_CLOUD_LOCATION` (Vertex uses Application Default Credentials). Without
+them the suite skips itself and says what is missing.
+
+It is not a required check, and should not become one: it costs money per run
+and can fail for reasons no PR caused. Run it before a release, and after any
+change to the wire layer — `internal/harness`, `harnessconfig.go`,
+`stepconv.go`, `eventproc.go`.
+
+Everything in the default sweep still runs against the fake harness in
+`internal/harness` — a real subprocess doing the real handshake over a real
+WebSocket, with a scripted agent behind it. See
 [`docs/DESIGN.md`](../docs/DESIGN.md) §7.
+
+### Harness version skew
+
+The `.proto` this repo vendors is ahead of the newest published harness. The
+pin in `fetch-harness` records which harness the live suite was last verified
+against; bump it in the same commit that adapts the SDK to a newer one.
 
 ## Coverage floors
 

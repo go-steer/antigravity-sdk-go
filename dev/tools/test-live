@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+# Copyright 2026 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Run the live end-to-end suite in livetest/ against a real localharness
+# binary and a real model backend.
+#
+# Deliberately NOT part of dev/tools/ci. It costs money, it needs
+# credentials, and it can fail for reasons that are not this repo's fault —
+# a quota, a backend outage, a model deprecation. A required check that goes
+# red when a datacenter hiccups stops being read. Run it before a release,
+# and after any change to the wire layer: internal/harness, harnessconfig.go,
+# stepconv.go, eventproc.go.
+#
+# Auth, either:
+#   GEMINI_API_KEY=...
+#   GOOGLE_GENAI_USE_VERTEXAI=true GOOGLE_CLOUD_PROJECT=... GOOGLE_CLOUD_LOCATION=...
+#     (Vertex uses Application Default Credentials — `gcloud auth application-default login`)
+#
+# Usage:
+#   dev/tools/test-live                 # whole suite
+#   dev/tools/test-live -run TestFoo    # extra args go to `go test`
+set -euo pipefail
+. "$(dirname "$0")/common.sh"
+cd "$(repo_root)"
+
+# The suite skips itself with a diagnostic when the harness is missing, but
+# fetching it here means the common case is one command, not two.
+dev/tools/fetch-harness
+
+# `go test` timeout, not the per-turn one: livetest sets its own 3m bound per
+# test, and this is the outer stop for the whole package.
+TIMEOUT="${LIVE_TEST_TIMEOUT:-30m}"
+
+# -count=1 defeats the test cache. A cached "ok" from an earlier run would
+# defeat the purpose: the whole point is to talk to the harness *now*.
+#
+# No -race: the harness is a separate process, so there is nothing here the
+# unit suite does not already race-check, and the instrumented binary makes
+# an already-slow suite slower.
+printf '  · live (livetest, harness %s)\n' "$(dev/tools/fetch-harness --print)"
+go test -tags live -count=1 -timeout "$TIMEOUT" -v ./livetest/ "$@"

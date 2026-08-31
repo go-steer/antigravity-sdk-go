@@ -63,12 +63,21 @@ STEPS=(
   "vuln      dev/tools/verify-vuln"
 )
 
-# There is no smoke step, and that is not an oversight. The agentic loop
-# lives in a precompiled `localharness` binary this repo does not ship and
-# cannot obtain, so there is no end-to-end path to exercise. The seam the
-# unit suite would otherwise miss — the startup handshake and the WebSocket
-# framing — is covered by internal/harness's fake harness, which speaks the
-# real protocol over a real local socket.
+# There is no live step here, and that is deliberate — but not because a
+# live run is impossible. It is: the precompiled `localharness` binary ships
+# inside the published `google-antigravity` Python wheel, dev/tools/
+# fetch-harness unpacks it, and dev/tools/test-live drives the end-to-end
+# suite in livetest/ against it.
+#
+# It stays out of this sweep because it needs credentials and costs money
+# per run, and because it can go red for reasons no PR caused — a quota, a
+# backend outage, a model deprecation. A gate that fails on a datacenter
+# hiccup is a gate people learn to ignore. Run dev/tools/test-live by hand
+# before a release, and after touching the wire layer.
+#
+# What remains covered here is the same seam as before: internal/harness's
+# fake harness speaks the real protocol over a real local socket, so the
+# handshake and WebSocket framing are exercised without credentials.
 
 # ANTIGRAVITY_CI_SKIP is a space-separated list of labels to omit. It exists
 # for one caller: .github/workflows/ci.yml skips `apidiff`, which runs as its
