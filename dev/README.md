@@ -243,6 +243,36 @@ Its `HEADER_BODY` and the `goheader` template in `dev/tools/.golangci.yml` are
 two copies of the same text and drift silently. Change one, change the other,
 and run `dev/tools/lint-go` to confirm they still agree.
 
+## Lint cache
+
+`dev/tools/lint-go` points `GOLANGCI_LINT_CACHE` at `dev/.lintcache/`, one per
+checkout, gitignored. This is not a speed tweak — a shared cache produces
+confident, reproducible, wrong failures.
+
+golangci-lint keys its cache on package content, and each cached issue record
+carries the absolute path of the file in the directory that computed it. Lint
+the same commit from a second checkout — a git worktree, a scratch clone — and
+the second run replays the first one's paths. The `path:` exclusions in
+`.golangci.yml` are anchored (`^examples/`) against a path relative to the git
+root, so a replayed `../../elsewhere/examples/foo.go` matches none of them, and
+every finding the examples are deliberately exempt from erupts at once:
+
+```
+../../home/user/projects/antigravity-sdk-go/examples/…/main.go:52:19: Error return value of `agent.Close` is not checked (errcheck)
+54 issues:
+* errcheck: 49
+* gosec: 4
+* unparam: 1
+```
+
+Every one of those findings is real code in a real file. None of them is a
+failure. The tell is the `../` — a path that escaped the module means the
+exclusions could not have matched — but the natural reading is that CI is
+wrong or the tree is dirty, and CI is green because its cache is always cold.
+
+A per-checkout cache removes the only path by which one tree's results reach
+another's run. It costs one cold lint per checkout, which is seconds.
+
 ## Pinned tool versions
 
 | Tool          | Version    | Source                                                     |

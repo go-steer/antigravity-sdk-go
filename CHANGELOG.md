@@ -110,3 +110,8 @@ in [`CONTRIBUTING.md`](./CONTRIBUTING.md).
   `ConfirmInTerminal` — now show the native path and the SDK tool name too.
 - `ToolCall.CanonicalPath` is no longer erased by a later path argument that is
   empty, for the same reason.
+- `dev/tools/lint-go` gives golangci-lint a per-checkout cache. A shared cache
+  replays the absolute paths of whichever checkout filled it, which defeats the
+  anchored `path:` exclusions in `.golangci.yml` and reports every finding the
+  examples are exempt from as a failure — reproducibly, and only ever locally,
+  since CI's cache is always cold.

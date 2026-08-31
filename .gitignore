@@ -24,6 +24,11 @@ coverage.*
 # specific, and reproducible from the version pinned in that script.
 /dev/.harness/
 
+# golangci-lint's cache, kept per-checkout by dev/tools/lint-go. Sharing one
+# cache between checkouts makes it replay another directory's absolute paths,
+# which silently defeats the path-based exclusions in .golangci.yml.
+/dev/.lintcache/
+
 # Editor / OS noise
 .idea/
 .vscode/
