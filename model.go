@@ -16,6 +16,7 @@ package antigravity
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 )
 
@@ -66,7 +67,8 @@ type GeminiModelOptions struct {
 }
 
 // ModelEndpoint describes how to reach and authenticate against a model
-// backend. The implementations are [GeminiAPIEndpoint] and [VertexEndpoint].
+// backend. The implementations are [GeminiAPIEndpoint], [VertexEndpoint], and
+// [GemmaEndpoint].
 type ModelEndpoint interface {
 	// Validate reports whether the endpoint is usable, consulting the
 	// environment for credentials the caller did not supply.
@@ -160,6 +162,48 @@ func (e *VertexEndpoint) Validate() error {
 	}
 	if !regional && !express {
 		return fmt.Errorf("for Vertex AI, either Project and Location, or APIKey, must be set")
+	}
+	return nil
+}
+
+// GemmaEndpoint targets an OpenAI-compatible completions API, which is how the
+// agent reaches a model running locally: Ollama, LM Studio, llama.cpp's server,
+// vLLM, or anything else speaking that shape.
+//
+// Only the URL is configured. Authentication is not part of the contract with
+// the harness, which is a fair reflection of what these servers expect —
+// nothing, or a token supplied out of band. For a hosted OpenAI-compatible
+// gateway that does want a key, use [GeminiAPIEndpoint] with its BaseURL set.
+//
+// See [WithOpenAIEndpoint], or [WithOllama] for Ollama specifically.
+type GemmaEndpoint struct {
+	// BaseURL is the root of the OpenAI-compatible API, conventionally ending
+	// in /v1 — for example http://localhost:11434/v1.
+	BaseURL string
+}
+
+func (*GemmaEndpoint) isModelEndpoint() {}
+
+// Validate reports whether the URL is one the harness can dial.
+//
+// The server is not contacted: it may legitimately be started after the agent,
+// and a local model server is slow enough to start that refusing to construct
+// an agent until it answers would be its own annoyance. [WithOllama] does
+// check, because there the address is ours to predict rather than the
+// caller's to supply.
+func (e *GemmaEndpoint) Validate() error {
+	if e.BaseURL == "" {
+		return fmt.Errorf("an OpenAI-compatible endpoint requires a base URL, such as http://localhost:11434/v1")
+	}
+	u, err := url.Parse(e.BaseURL)
+	if err != nil {
+		return fmt.Errorf("base URL %q is not a valid URL: %w", e.BaseURL, err)
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return fmt.Errorf("base URL %q must be http or https", e.BaseURL)
+	}
+	if u.Host == "" {
+		return fmt.Errorf("base URL %q names no host", e.BaseURL)
 	}
 	return nil
 }

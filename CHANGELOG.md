@@ -27,7 +27,16 @@ in [`CONTRIBUTING.md`](./CONTRIBUTING.md).
   fallbacks, Gemini Developer API and Vertex endpoints, system prompts and
   structured `SystemInstructions`, workspaces, skills paths, budgets, retry
   policy, session continuation, and structured output via
-  `WithResponseSchema[T]`.
+  `WithResponseSchema[T]`. Python's `LiteRTAgentConfig` and `LiteRTBackend` are
+  a deliberate omission: there is no `litert_lm` Go package, and a server
+  started by hand is reachable through `WithOpenAIEndpoint` below. See
+  "Deliberate divergences" in [`docs/DESIGN.md`](./docs/DESIGN.md) §6.
+- Local models: `WithOpenAIEndpoint(baseURL, model)` for any server speaking the
+  OpenAI completions API, and `WithOllama(model)` for Ollama specifically, which
+  resolves the address from `OLLAMA_HOST` and checks at `New` that the server is
+  running and the model is pulled. Both are backed by the exported
+  `GemmaEndpoint`. A configuration whose every model is local gets no Gemini
+  defaults, so it needs no API key.
 - Safety policies: `Allow` / `Deny` / `AskUser` and their builtin-tool and MCP
   variants, composed by `NewEnforcer`, which evaluates in priority order —
   specific targets beat wildcards, and deny beats ask-user beats approve. The

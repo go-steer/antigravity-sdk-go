@@ -25,6 +25,9 @@ The SDK picks up `GEMINI_API_KEY` from the environment; `antigravity.WithAPIKey`
 overrides it in code. See the top-level [README](../../README.md) for the full
 setup.
 
+[local_models](local_models/main.go) is the exception: it runs against a model
+on your own machine and needs no key, only the harness.
+
 ## Your first turn
 
 ```go
@@ -75,6 +78,7 @@ The building blocks: creating an agent, streaming from it, shaping who it is.
 | [streaming](streaming/main.go) | `resp.Text()` and `resp.Thoughts()` as `iter.Seq2`, and what else `Chunks()` carries. |
 | [persona_config](persona_config/main.go) | `TemplatedInstructions` for structured identity, `CustomInstructions` when you want the whole prompt. |
 | [prioritized_inference](prioritized_inference/main.go) | Asking for the priority service tier, and noticing when the server downgrades you. |
+| [local_models](local_models/main.go) | `WithOllama` and `WithOpenAIEndpoint`: a model on your own machine, no API key. |
 
 ### Safety and governance
 

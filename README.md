@@ -72,6 +72,33 @@ agent, err := antigravity.New(ctx,
 Empty arguments fall back to `GOOGLE_CLOUD_PROJECT` and
 `GOOGLE_CLOUD_LOCATION`. Explicit options always beat environment variables.
 
+### Local models
+
+A model running on your own machine needs no credentials at all. Ollama has a
+shorthand:
+
+```go
+agent, err := antigravity.New(ctx, antigravity.WithOllama("qwen3"))
+```
+
+The address comes from `OLLAMA_HOST`, defaulting to `http://localhost:11434`.
+`New` checks the server before it starts anything, so a stopped daemon or a
+model you have not pulled is reported there, with the command that fixes it,
+rather than mid-turn.
+
+Any other server speaking the OpenAI completions API — LM Studio, llama.cpp's
+server, vLLM — works the same way, addressed directly:
+
+```go
+agent, err := antigravity.New(ctx,
+	antigravity.WithOpenAIEndpoint("http://localhost:1234/v1", "your-model"))
+```
+
+Either option makes the local model the only model: no Gemini defaults are
+added, so no key is required, and image generation is unavailable. Naming a
+Gemini or Vertex model alongside it brings the defaults back. See
+[local_models](examples/getting_started/local_models/main.go).
+
 ## Quickstart
 
 ```sh
@@ -79,7 +106,7 @@ export GEMINI_API_KEY="your-api-key"
 go run ./examples/getting_started/hello_world
 ```
 
-Then browse [`examples/`](examples/): twenty-three
+Then browse [`examples/`](examples/): twenty-four
 [getting started](examples/getting_started/) programs, one feature each, and
 nine [deep dives](examples/deep_dives/) that combine them into applications.
 
