@@ -154,10 +154,15 @@ Conventions worth knowing at agent prompt time:
 
 ## Current state
 
-**Initial port, unreleased.** The SDK is feature-complete against the Python
-reference — configuration, policies, hooks, tools, MCP, subagents, triggers,
-skills, streaming, interactive mode, structured output — with the OTel
-integration in `tracing/` and 30-odd runnable examples under `examples/`.
+**Initial port, unreleased.** The SDK covers the Python reference's surface —
+configuration, policies, hooks, tools, MCP, subagents, triggers, skills,
+streaming, interactive mode, structured output, and local models over an
+OpenAI-compatible endpoint — with the OTel integration in `tracing/` and 30-odd
+runnable examples under `examples/`.
+
+One deliberate omission: Python's `LiteRTAgentConfig` / `LiteRTBackend` have no
+Go counterpart, because there is no `litert_lm` Go package to start a server
+with. See "Deliberate divergences" in `docs/DESIGN.md` §6 before adding one.
 
 No release tag has been cut, so `dev/api-breaks.txt` is empty and
 `verify-apidiff` has no baseline to compare against yet.

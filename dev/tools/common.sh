@@ -41,10 +41,15 @@ repo_root() {
 # Discovered rather than listed, so a module added tomorrow is covered
 # without editing every script. Ordered root first: it is the one most
 # likely to fail, and fast-fail wants it early.
+#
+# Dot-directories are skipped wholesale: `.git`, and also `.claude/worktrees`,
+# where an agent harness checks out a second copy of this repo. Walking into
+# one means checking someone else's in-progress work and reporting it as this
+# tree's failure.
 modules() {
   local root
   root="$(repo_root)"
-  ( cd "$root" && find . -name go.mod -not -path './.git/*' -printf '%h\n' | sed 's|^\./||' | sort -t/ -k1,1 )
+  ( cd "$root" && find . -name go.mod -not -path './.*/*' -printf '%h\n' | sed 's|^\./||' | sort -t/ -k1,1 )
 }
 
 # for_each_module <label> <command...>

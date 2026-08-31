@@ -27,9 +27,10 @@ ensure_tool goimports golang.org/x/tools/cmd/goimports@latest
 #
 # internal/genproto is left alone for the reason in verify-go-format: it is
 # generated, and reformatting it only guarantees a diff after the next
-# `buf generate`.
+# `buf generate`. Dot-directories are skipped for the reason in common.sh:
+# one of them may hold another checkout of this repo.
 mapfile -t files < <(
-  find . -name '*.go' -not -path './.git/*' -not -path './internal/genproto/*' -print | sort
+  find . -name '*.go' -not -path './.*/*' -not -path './internal/genproto/*' -print | sort
 )
 
 gofmt -s -w "${files[@]}"

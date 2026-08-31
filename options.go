@@ -15,6 +15,7 @@
 package antigravity
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -63,12 +64,17 @@ type config struct {
 
 	// Models. The shorthand fields build an endpoint for any model target
 	// that does not carry one of its own.
-	models   []ModelTarget
-	model    string
-	apiKey   string
-	vertex   bool
-	project  string
-	location string
+	models      []ModelTarget
+	model       string
+	apiKey      string
+	vertex      bool
+	project     string
+	location    string
+	ollamaModel string
+
+	// preflight holds checks that need the network, so they run once in New
+	// rather than in resolve, which must stay pure.
+	preflight []func(context.Context) error
 
 	retry  *RetryConfig
 	budget *BudgetConfig
@@ -297,6 +303,28 @@ func WithModel(name string) Option {
 // the package defaults.
 func WithModels(models ...ModelTarget) Option {
 	return func(c *config) { c.models = append(c.models, models...) }
+}
+
+// WithOpenAIEndpoint runs the agent against a model served by an
+// OpenAI-compatible API at baseURL — Ollama, LM Studio, llama.cpp's server,
+// vLLM, or any other server speaking that shape.
+//
+// baseURL is the API root, conventionally ending in /v1. The server is not
+// contacted here; it may be started after the agent. For Ollama, prefer
+// [WithOllama], which knows the address and checks it.
+//
+// Configuring a local model this way suppresses the Gemini defaults: the agent
+// gets the one model named here and no image model, so no Gemini credentials
+// are needed. Naming a Gemini or Vertex target alongside it brings those
+// defaults back.
+func WithOpenAIEndpoint(baseURL, model string) Option {
+	return func(c *config) {
+		c.models = append(c.models, ModelTarget{
+			Name:     model,
+			Types:    []ModelType{ModelTypeText},
+			Endpoint: &GemmaEndpoint{BaseURL: baseURL},
+		})
+	}
 }
 
 // WithAPIKey authenticates against the Gemini Developer API. When unset,
@@ -603,13 +631,20 @@ func (c *config) resolveAppDataDir() error {
 // resolveModels merges explicitly configured targets with the shorthand model
 // and the package defaults.
 //
-// Explicit targets win; the shorthand adds one more; defaults fill in only the
-// modalities nobody covered, so an agent always has both a text and an image
-// model even when the caller named just one.
+// Explicit targets win; the shorthands add one more each; defaults fill in only
+// the modalities nobody covered, so an agent always has both a text and an
+// image model even when the caller named just one.
 func (c *config) resolveModels() error {
 	merged := slices.Clone(c.models)
 	if c.model != "" {
 		merged = append(merged, ModelTarget{Name: c.model, Types: []ModelType{ModelTypeText}})
+	}
+	if c.ollamaModel != "" {
+		target, err := c.resolveOllama()
+		if err != nil {
+			return &ConfigError{Field: "models", Err: err}
+		}
+		merged = append(merged, target)
 	}
 
 	covered := map[ModelType]bool{}
@@ -621,19 +656,26 @@ func (c *config) resolveModels() error {
 			covered[t] = true
 		}
 	}
-	if !covered[ModelTypeText] {
-		merged = append(merged, ModelTarget{
-			Name:     DefaultModel,
-			Types:    []ModelType{ModelTypeText},
-			Endpoint: c.newEndpoint(),
-		})
-	}
-	if !covered[ModelTypeImage] {
-		merged = append(merged, ModelTarget{
-			Name:     DefaultImageGenerationModel,
-			Types:    []ModelType{ModelTypeImage},
-			Endpoint: c.newEndpoint(),
-		})
+
+	// A configuration built entirely from local servers gets no Gemini
+	// defaults. Adding one would demand a Gemini API key from someone who
+	// deliberately asked for a model on their own machine, and refuse to
+	// construct the agent when they have none.
+	if !localOnly(merged) {
+		if !covered[ModelTypeText] {
+			merged = append(merged, ModelTarget{
+				Name:     DefaultModel,
+				Types:    []ModelType{ModelTypeText},
+				Endpoint: c.newEndpoint(),
+			})
+		}
+		if !covered[ModelTypeImage] {
+			merged = append(merged, ModelTarget{
+				Name:     DefaultImageGenerationModel,
+				Types:    []ModelType{ModelTypeImage},
+				Endpoint: c.newEndpoint(),
+			})
+		}
 	}
 
 	for i := range merged {
@@ -643,6 +685,21 @@ func (c *config) resolveModels() error {
 	}
 	c.models = merged
 	return nil
+}
+
+// localOnly reports whether every configured target is served by a local
+// OpenAI-compatible server. An empty set is not local: it is the default
+// configuration, which is Gemini.
+func localOnly(targets []ModelTarget) bool {
+	if len(targets) == 0 {
+		return false
+	}
+	for i := range targets {
+		if _, ok := targets[i].Endpoint.(*GemmaEndpoint); !ok {
+			return false
+		}
+	}
+	return true
 }
 
 // newEndpoint builds a fresh endpoint from the shorthand credentials. Each

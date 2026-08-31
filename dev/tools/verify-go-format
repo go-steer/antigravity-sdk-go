@@ -30,10 +30,13 @@ cd "$(repo_root)"
 
 ensure_tool goimports golang.org/x/tools/cmd/goimports@latest
 
-GENERATED='^internal/genproto/'
+# Both tools walk into dot-directories, so those are filtered here rather
+# than at the walk. See common.sh: one of them may be another checkout of
+# this repo, whose formatting is not this tree's problem.
+SKIP='^internal/genproto/|^\.'
 
-bad_fmt=$(gofmt -s -l . | grep -Ev "$GENERATED" || true)
-bad_imports=$(goimports -l -local github.com/go-steer/antigravity-sdk-go . | grep -Ev "$GENERATED" || true)
+bad_fmt=$(gofmt -s -l . | grep -Ev "$SKIP" || true)
+bad_imports=$(goimports -l -local github.com/go-steer/antigravity-sdk-go . | grep -Ev "$SKIP" || true)
 
 if [[ -n "$bad_fmt" || -n "$bad_imports" ]]; then
   if [[ -n "$bad_fmt" ]]; then

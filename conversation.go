@@ -187,6 +187,14 @@ func (c *Conversation) Steps(ctx context.Context) iter.Seq2[Step, error] {
 			case ev := <-c.proc.steps:
 				switch {
 				case ev.idle:
+					// The read loop queues this marker and only then opens the
+					// idle gate, so a reader can get here first. Opening it
+					// ourselves is what makes "iteration ended" mean "the turn
+					// is over" to the next Send, which would otherwise see a
+					// running turn with an empty queue and drain forever.
+					// markIdle is idempotent; the read loop's own call is then
+					// a no-op.
+					c.proc.markIdle()
 					c.finishTurn()
 					return
 				case ev.err != nil:

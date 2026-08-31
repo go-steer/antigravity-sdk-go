@@ -79,6 +79,13 @@ func New(ctx context.Context, opts ...Option) (_ *Agent, err error) {
 	if err := cfg.resolve(); err != nil {
 		return nil, err
 	}
+	// Before the subprocess, so a model server that is not running is reported
+	// as such rather than leaving a harness to tear down.
+	for _, check := range cfg.preflight {
+		if err := check(ctx); err != nil {
+			return nil, &ConfigError{Field: "models", Err: err}
+		}
+	}
 
 	enforcer, err := NewEnforcer(cfg.policies, mcpServerNames(cfg.mcpServers))
 	if err != nil {

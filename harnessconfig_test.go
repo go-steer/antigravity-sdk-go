@@ -436,10 +436,14 @@ func TestModelProtos(t *testing.T) {
 			Name:     "vertex-model",
 			Endpoint: &VertexEndpoint{Project: "proj", Location: "us-central1"},
 		},
+		{
+			Name:     "local-model",
+			Endpoint: &GemmaEndpoint{BaseURL: "http://localhost:11434/v1"},
+		},
 	})
 
-	if len(got) != 2 {
-		t.Fatalf("got %d models, want 2", len(got))
+	if len(got) != 3 {
+		t.Fatalf("got %d models, want 3", len(got))
 	}
 
 	gemini := got[0].GetGeminiApiEndpoint()
@@ -467,6 +471,14 @@ func TestModelProtos(t *testing.T) {
 	// An undeclared modality defaults to text rather than unspecified.
 	if !slices.Equal(got[1].GetTypes(), []pb.ModelType{pb.ModelType_MODEL_TYPE_TEXT}) {
 		t.Errorf("types = %v, want text by default", got[1].GetTypes())
+	}
+
+	gemma := got[2].GetGemmaEndpoint()
+	if gemma.GetBaseUrl() != "http://localhost:11434/v1" {
+		t.Errorf("gemma endpoint = %v", gemma)
+	}
+	if got[2].GetGeminiApiEndpoint() != nil || got[2].GetVertexEndpoint() != nil {
+		t.Error("a local model also rendered a hosted endpoint")
 	}
 }
 

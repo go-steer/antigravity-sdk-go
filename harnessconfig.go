@@ -346,6 +346,10 @@ func modelProtos(models []ModelTarget) []*pb.ModelConfig {
 				ApiKey:      proto.String(e.APIKey),
 				Options:     geminiOptionsProto(e.Options),
 			}.Build()
+		case *GemmaEndpoint:
+			b.GemmaEndpoint = pb.GemmaEndpoint_builder{
+				BaseUrl: proto.String(e.BaseURL),
+			}.Build()
 		}
 		out = append(out, b.Build())
 	}

@@ -293,6 +293,30 @@ This is also why `tracing/` does not register a pre-tool-call hook (§4).
 - **`chat()` rejects nil, empty, and whitespace-only prompts**, including a
   sequence whose elements are all blank strings.
 
+### Deliberate divergences
+
+Two, both about local models. Everything else that differs from Python is a
+bug.
+
+**LiteRT is a non-goal.** Python ships `LiteRTAgentConfig` and `LiteRTBackend`,
+which start a `litert_lm` server in-process and point the harness at it. There
+is no `litert_lm` Go package, and writing one is a model-runtime project, not an
+SDK feature. A Go equivalent could only tell the caller to start the server
+themselves — at which point `WithOpenAIEndpoint` already covers it, since that
+is the same OpenAI-compatible shape LiteRT serves. If a Go binding appears,
+revisit.
+
+**A wholly local configuration gets no Gemini defaults.** `resolveModels`
+normally fills in both modalities, so an agent always has a text *and* an image
+model. It skips that when every configured target is a `*GemmaEndpoint`
+(`localOnly`). Otherwise the synthesized image-model default would carry a
+`GeminiAPIEndpoint`, whose `Validate` demands `GEMINI_API_KEY` — so
+`WithOllama("qwen3")` alone would refuse to construct for exactly the person who
+chose a local model to avoid needing a key. This also matches what Python's
+`LocalOpenAIAgentConfig` produces: one model, no image model. Mixing a Gemini
+target in brings the defaults back, because then the caller does have
+credentials and does want the fallbacks.
+
 ### Turn completion and the event queue
 
 An implementation detail with a race in it, worth stating because it has bitten
