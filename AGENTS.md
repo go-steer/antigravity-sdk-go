@@ -28,8 +28,19 @@ It is a **client, not an agent runtime**. The agentic loop lives in a
 precompiled binary called `localharness`, which the SDK spawns and drives over
 a local WebSocket. There is no model inference, tool-dispatch loop, or prompt
 assembly in this repository — only the client half of a protocol. The binary is
-**not in this repository and not on a machine that has only cloned it**, so
-live end-to-end runs are not possible here.
+**not in this repository and not on a machine that has only cloned it**.
+
+It is obtainable, though, and live end-to-end runs *are* possible here: Google
+ships `localharness` inside the published `google-antigravity` Python wheel,
+`dev/tools/fetch-harness` unpacks it, and `dev/tools/test-live` runs the
+`live`-tagged suite in `livetest/` against a real harness and a real model.
+That needs credentials and spends money, so it is not part of `dev/tools/ci`
+and you should not run it casually — but when you are changing the wire layer
+(`internal/harness`, `harnessconfig.go`, `stepconv.go`, `eventproc.go`), it is
+the only thing that can tell you whether the bytes we send are the bytes the
+harness expects. The fake harness in `internal/harness` never reads a schema it
+is sent and never calls a model. Prefer a live run over reasoning about the
+protocol, and say plainly in the PR whether you did one.
 
 ## Hard rules (violations are bugs)
 
@@ -87,6 +98,11 @@ The default test run needs no network, no credentials, and no `localharness`.
 Anything touching the transport runs against the **fake harness** in
 `internal/harness`, which performs the real stdin/stdout handshake and then
 serves scripted events over a real local WebSocket.
+
+The opt-in exception is `dev/tools/test-live`, which drives a real harness and
+a real model. It is not in `dev/tools/ci` and it costs money — but
+`dev/tools/vet` type-checks the suite with `-tags live`, so it cannot rot
+unnoticed behind its build tag.
 
 ## Conventions
 
@@ -163,8 +179,13 @@ integration in `tracing/` and 30-odd runnable examples under `examples/`.
 No release tag has been cut, so `dev/api-breaks.txt` is empty and
 `verify-apidiff` has no baseline to compare against yet.
 
-The gap is verification against a real harness. Every transport test runs
-against the fake one, which cannot catch a place where our reading of
-`local_connection.py` is simply wrong. The first run against a real
-`localharness` should be treated as a review of the protocol layer, not a smoke
-test.
+The port has now been run against a real harness. That first pass — the
+`livetest/` suite plus a sweep of every example — found three defects the
+entire fake-harness suite was green on, two of which are fixed and recorded in
+`CHANGELOG.md`. The lesson generalises: a test against the fake harness cannot
+catch a place where our reading of `local_connection.py` is simply wrong,
+because the fake was written from the same reading. Treat a live run as a
+review of the protocol layer, not a smoke test.
+
+The remaining gap is that live runs are opt-in and unscheduled by default. See
+`dev/README.md` "Live testing", and #4 for the CI cadence.
