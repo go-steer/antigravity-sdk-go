@@ -460,7 +460,21 @@ const (
 	helperCrash = "crash"
 	// helperHangUp completes the handshake and then drops the WebSocket.
 	helperHangUp = "hangup"
+	// helperOldProto behaves as a harness whose protobuf bindings predate the
+	// vendored ones: it refuses the initialize frame, says why on stderr, and
+	// exits. Reproduced verbatim from localharness 0.1.15 rejecting
+	// LIFECYCLE_HOOK_STOP.
+	helperOldProto = "oldproto"
 )
+
+// oldProtoStderr is what localharness 0.1.15 prints when a stop hook is
+// registered: its LifecycleHook enum stops at LIFECYCLE_HOOK_ON_COMPACTION = 8,
+// so the value the SDK sends for a stop hook takes the whole config down with
+// it. The wording after the harness's own prefix is protobuf-go's, reproduced
+// byte for byte — including the non-breaking space that release emits after
+// "proto:".
+const oldProtoStderr = "Failed to parse initial message: proto:\u00a0(line 1:1614): " +
+	`invalid value for enum field enabledHooks: "LIFECYCLE_HOOK_STOP"`
 
 // TestMain turns this binary into the stand-in harness when the mode variable
 // is set, which is how a re-executed copy of it plays the other side of the
@@ -504,6 +518,13 @@ func standInHarness(mode string) {
 		if mode == helperHangUp {
 			_ = ws.Close(websocket.StatusGoingAway, "going away")
 			return
+		}
+		if mode == helperOldProto {
+			// Consume the initialize frame, complain about it, and die without
+			// answering — the whole of what a too-old harness does.
+			_, _, _ = ws.Read(r.Context())
+			fmt.Fprintln(os.Stderr, oldProtoStderr)
+			os.Exit(1)
 		}
 		serveStandInSession(r.Context(), ws)
 	})}
@@ -683,6 +704,258 @@ func TestProcessInitializeReportsAHangup(t *testing.T) {
 	if !errors.As(err, &startErr) {
 		t.Errorf("error = %T (%v), want *StartError", err, err)
 	}
+}
+
+// TestProcessInitializeDiagnosesAnOldHarness covers the failure a user hits
+// when their localharness predates the vendored protos: the harness rejects the
+// whole config over one value it has never heard of, and all the SDK sees on
+// the wire is an EOF. The transport error alone is unactionable, so the cause
+// has to be read out of stderr and spelled out.
+func TestProcessInitializeDiagnosesAnOldHarness(t *testing.T) {
+	p, err := startStandIn(t, helperOldProto)
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer p.Close()
+
+	_, err = p.Initialize(t.Context(), pb.HarnessConfig_builder{
+		EnabledHooks: []pb.LifecycleHook{pb.LifecycleHook_LIFECYCLE_HOOK_STOP},
+	}.Build())
+	if err == nil {
+		t.Fatal("Initialize succeeded against a harness that rejected the config")
+	}
+
+	var skew *ProtocolSkewError
+	if !errors.As(err, &skew) {
+		t.Fatalf("error = %T (%v), want a *ProtocolSkewError in the chain", err, err)
+	}
+	if skew.Field != "enabledHooks" {
+		t.Errorf("Field = %q, want enabledHooks", skew.Field)
+	}
+	if skew.Value != "LIFECYCLE_HOOK_STOP" {
+		t.Errorf("Value = %q, want LIFECYCLE_HOOK_STOP", skew.Value)
+	}
+
+	// The diagnosis is only worth anything if it reaches the printed message,
+	// names the cause, and names the way out.
+	got := err.Error()
+	for _, want := range []string{
+		"harness protocol skew",
+		`"LIFECYCLE_HOOK_STOP"`,
+		"older than the protocol revision",
+		"Upgrade the localharness binary",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("error = %q, want it to contain %q", got, want)
+		}
+	}
+
+	// Adding an explanation must not cost the evidence it was drawn from.
+	if !strings.Contains(got, "waiting for the initialize response") {
+		t.Errorf("error = %q, want the original transport failure kept", got)
+	}
+	var startErr *StartError
+	if !errors.As(err, &startErr) {
+		t.Fatalf("error = %T, want a *StartError in the chain", err)
+	}
+	if !strings.Contains(startErr.Stderr, "Failed to parse initial message") {
+		t.Errorf("Stderr = %q, want the harness output kept verbatim", startErr.Stderr)
+	}
+}
+
+// TestProcessInitializeDoesNotBlameSkewOnOtherFailures is the other half of the
+// diagnosis: a harness that simply hangs up says nothing about its protocol
+// version, so guessing at one would send the user chasing an upgrade they do
+// not need.
+func TestProcessInitializeDoesNotBlameSkewOnOtherFailures(t *testing.T) {
+	p, err := startStandIn(t, helperHangUp)
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer p.Close()
+
+	_, err = p.Initialize(t.Context(), pb.HarnessConfig_builder{}.Build())
+	if err == nil {
+		t.Fatal("Initialize succeeded against a harness that hung up")
+	}
+	var skew *ProtocolSkewError
+	if errors.As(err, &skew) {
+		t.Errorf("error = %v, want no protocol-skew diagnosis for a plain hangup", err)
+	}
+	if strings.Contains(err.Error(), "harness protocol skew") {
+		t.Errorf("error = %q, want no protocol-skew wording", err)
+	}
+}
+
+// TestSkewPatternsMatchTheProtojsonRuntime pins the detection to errors the
+// linked protobuf-go actually produces, rather than to a transcript of one
+// harness release. The harness rejects our frame with the same decoder, so if
+// this wording ever changes the detection has to change with it — and the
+// failure should be here, not in the field.
+func TestSkewPatternsMatchTheProtojsonRuntime(t *testing.T) {
+	tests := []struct {
+		name      string
+		frame     string
+		wantField string
+		wantValue string
+	}{{
+		name:      "unknown enum value",
+		frame:     `{"config":{"enabledHooks":["LIFECYCLE_HOOK_FROM_THE_FUTURE"]}}`,
+		wantField: "enabledHooks",
+		wantValue: "LIFECYCLE_HOOK_FROM_THE_FUTURE",
+	}, {
+		name:      "unknown field",
+		frame:     `{"config":{"fieldFromTheFuture":true}}`,
+		wantField: "fieldFromTheFuture",
+	}}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var ev pb.InitializeConversationEvent
+			parseErr := protojson.Unmarshal([]byte(tt.frame), &ev)
+			if parseErr == nil {
+				t.Fatalf("protojson accepted %s, so it cannot stand in for an older harness", tt.frame)
+			}
+
+			cause := errors.New("waiting for the initialize response: EOF")
+			got := diagnoseSkew(cause, "Failed to parse initial message: "+parseErr.Error())
+
+			var skew *ProtocolSkewError
+			if !errors.As(got, &skew) {
+				t.Fatalf("diagnoseSkew(%q) = %T, want a *ProtocolSkewError", parseErr, got)
+			}
+			if skew.Field != tt.wantField {
+				t.Errorf("Field = %q, want %q", skew.Field, tt.wantField)
+			}
+			if skew.Value != tt.wantValue {
+				t.Errorf("Value = %q, want %q", skew.Value, tt.wantValue)
+			}
+			if !errors.Is(got, cause) {
+				t.Error("the underlying transport failure is not reachable")
+			}
+		})
+	}
+}
+
+// TestDiagnoseSkewAcceptsEitherProtobufShape covers the variations in
+// protobuf-go's error text that the test above cannot reach, because it can only
+// observe what this build of protobuf-go emits.
+//
+// The character after "proto:" is a space or a non-breaking space, chosen from a
+// hash of the executable: fixed for any one binary \u2014 this one, the harness, a
+// future release of either \u2014 but not the same across them. And an error that
+// passes through protobuf-go's errors.Wrap gains text between the prefix and the
+// position. The harness in the field emits the non-breaking space.
+func TestDiagnoseSkewAcceptsEitherProtobufShape(t *testing.T) {
+	const detail = `(line 1:1614): invalid value for enum field enabledHooks: "LIFECYCLE_HOOK_STOP"`
+
+	tests := []struct {
+		name   string
+		stderr string
+	}{
+		{name: "space", stderr: "proto: " + detail},
+		{name: "non-breaking space", stderr: "proto:\u00a0" + detail},
+		{name: "wrapped", stderr: "proto: syntax error " + detail},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var skew *ProtocolSkewError
+			if !errors.As(diagnoseSkew(errors.New("EOF"), tt.stderr), &skew) {
+				t.Fatalf("diagnoseSkew(%q) found no skew", tt.stderr)
+			}
+			if skew.Value != "LIFECYCLE_HOOK_STOP" {
+				t.Errorf("Value = %q, want LIFECYCLE_HOOK_STOP", skew.Value)
+			}
+		})
+	}
+}
+
+func TestDiagnoseSkewLeavesUnrelatedFailuresAlone(t *testing.T) {
+	cause := errors.New("waiting for the initialize response: EOF")
+
+	tests := []struct {
+		name   string
+		stderr string
+	}{
+		{name: "empty"},
+		{name: "ordinary chatter", stderr: "harness starting\nlistening on 127.0.0.1:41234\n"},
+		{name: "a crash", stderr: "panic: runtime error: index out of range\n"},
+		// Only protobuf-go's own framing counts. Harness log lines that merely
+		// talk about fields are not evidence of a version mismatch.
+		{name: "unframed talk of an unknown field", stderr: `dropping unknown field "widget" from the model reply`},
+		{name: "unframed talk of an enum", stderr: `invalid value for enum field mode: "FAST"`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := diagnoseSkew(cause, tt.stderr); got != cause {
+				t.Errorf("diagnoseSkew = %v, want the cause returned untouched", got)
+			}
+		})
+	}
+}
+
+// TestProtocolSkewErrorWithoutAValue covers the unknown-field case, where there
+// is no offending value to name.
+func TestProtocolSkewErrorWithoutAValue(t *testing.T) {
+	err := &ProtocolSkewError{Field: "newField", Err: errors.New("EOF")}
+	got := err.Error()
+	if !strings.Contains(got, `the field "newField"`) {
+		t.Errorf("Error = %q, want the field named", got)
+	}
+	if strings.Contains(got, "the value") {
+		t.Errorf("Error = %q, want no empty value mentioned", got)
+	}
+}
+
+// TestStderrBufferWaitDrained covers the wait that makes the diagnosis possible
+// at all: the harness writes its complaint and exits at almost the same instant,
+// so a failure path that reads the buffer the moment the WebSocket dies can find
+// it empty. The wait is bounded because the stderr pipe stays open for as long
+// as any descendant of the harness holds its write end.
+func TestStderrBufferWaitDrained(t *testing.T) {
+	t.Run("returns once the pipe reaches EOF", func(t *testing.T) {
+		r, w := io.Pipe()
+		b := newStderrBuffer()
+		go b.consume(r)
+
+		// Written and closed only after the wait is already underway, which is
+		// the ordering the real failure path races against.
+		go func() {
+			time.Sleep(10 * time.Millisecond)
+			_, _ = io.WriteString(w, "Failed to parse initial message")
+			_ = w.Close()
+		}()
+
+		start := time.Now()
+		b.waitDrained(5 * time.Second)
+		if elapsed := time.Since(start); elapsed > 4*time.Second {
+			t.Errorf("waitDrained took %v, so it waited out the deadline instead of the EOF", elapsed)
+		}
+		if got := b.String(); got != "Failed to parse initial message" {
+			t.Errorf("String = %q, want the output written before EOF", got)
+		}
+	})
+
+	t.Run("gives up when the pipe stays open", func(t *testing.T) {
+		r, w := io.Pipe()
+		t.Cleanup(func() { _ = w.Close() })
+		b := newStderrBuffer()
+		go b.consume(r)
+
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			b.waitDrained(10 * time.Millisecond)
+		}()
+
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			t.Fatal("waitDrained never returned for a pipe that was never closed")
+		}
+	})
 }
 
 func TestStartErrorWithoutStderr(t *testing.T) {

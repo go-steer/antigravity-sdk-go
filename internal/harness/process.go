@@ -39,6 +39,12 @@ const (
 	// shutdownGrace is how long a closed harness gets to exit on its own
 	// before it is killed.
 	shutdownGrace = 5 * time.Second
+	// stderrDrainGrace is how long a failure path waits for the stderr reader
+	// to reach EOF before giving up on it. A harness that rejects something
+	// explains itself on stderr and then exits, so reading the buffer the
+	// instant the socket dies races the explanation; without this wait the
+	// diagnostic is there on most runs and missing on the rest.
+	stderrDrainGrace = 250 * time.Millisecond
 	// maxStderr caps retained harness stderr, which is unbounded in principle.
 	maxStderr = 64 << 10
 	// maxConfigSize rejects an implausible handshake length rather than
@@ -121,6 +127,7 @@ func Start(ctx context.Context, opts Options) (_ *Process, err error) {
 	defer func() {
 		if err != nil {
 			p.kill()
+			stderr.waitDrained(stderrDrainGrace)
 			err = &StartError{Err: err, Stderr: stderr.String()}
 		}
 	}()
@@ -217,12 +224,15 @@ func readOutputConfig(stdout io.Reader) (*pb.OutputConfig, error) {
 //
 // A failure here kills the subprocess and reports its stderr, because a
 // harness that rejects the config has usually explained itself there and
-// nowhere else.
+// nowhere else. That stderr is also read for the one cause the SDK can name on
+// the user's behalf: a harness too old to understand the config it was sent.
 func (p *Process) Initialize(ctx context.Context, cfg *pb.HarnessConfig) (*pb.InitializeConversationResponse, error) {
 	resp, err := p.conn.Initialize(ctx, cfg)
 	if err != nil {
 		p.kill()
-		return nil, &StartError{Err: err, Stderr: p.stderr.String()}
+		p.stderr.waitDrained(stderrDrainGrace)
+		stderr := p.stderr.String()
+		return nil, &StartError{Err: diagnoseSkew(err, stderr), Stderr: stderr}
 	}
 	return resp, nil
 }
@@ -325,11 +335,17 @@ func mergedEnv(extra map[string]string) []string {
 type stderrBuffer struct {
 	mu  sync.Mutex
 	buf bytes.Buffer
+
+	// drained closes when consume returns, which is when the harness's stderr
+	// pipe has reached EOF and the buffer will not grow again.
+	drained chan struct{}
 }
 
-func newStderrBuffer() *stderrBuffer { return &stderrBuffer{} }
+func newStderrBuffer() *stderrBuffer { return &stderrBuffer{drained: make(chan struct{})} }
 
 func (b *stderrBuffer) consume(r io.Reader) {
+	defer close(b.drained)
+
 	chunk := make([]byte, 4096)
 	for {
 		n, err := r.Read(chunk)
@@ -350,4 +366,19 @@ func (b *stderrBuffer) String() string {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return b.buf.String()
+}
+
+// waitDrained blocks until the harness's stderr pipe reaches EOF, or d elapses.
+//
+// It is bounded because the pipe stays open for as long as any descendant of
+// the harness holds its write end, which is not something a failure path may
+// wait on indefinitely.
+func (b *stderrBuffer) waitDrained(d time.Duration) {
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+
+	select {
+	case <-b.drained:
+	case <-timer.C:
+	}
 }

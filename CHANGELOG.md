@@ -115,3 +115,12 @@ in [`CONTRIBUTING.md`](./CONTRIBUTING.md).
   anchored `path:` exclusions in `.golangci.yml` and reports every finding the
   examples are exempt from as a failure — reproducibly, and only ever locally,
   since CI's cache is always cold.
+- A failed `New` now explains harness protocol skew instead of only reporting
+  the EOF it saw. When a `localharness` older than the vendored `.proto` rejects
+  the initialize config over a value it does not define — today,
+  `LIFECYCLE_HOOK_STOP`, which localharness 0.1.15 lacks, so `WithStopHook`
+  kills the session at startup — the message names the offending field and
+  value, says the binary is likely older than the protocol revision this SDK was
+  built against, and gives the remedies. The original failure and the harness
+  stderr stay in the error chain, and the stderr is no longer printed twice. See
+  "Harness protocol skew" in [`docs/DESIGN.md`](./docs/DESIGN.md).

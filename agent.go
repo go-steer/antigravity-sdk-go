@@ -16,6 +16,7 @@ package antigravity
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"sync"
@@ -128,7 +129,7 @@ func New(ctx context.Context, opts ...Option) (_ *Agent, err error) {
 
 	resp, err := proc.Initialize(ctx, cfg.harnessConfig(enforcer))
 	if err != nil {
-		return nil, &HarnessError{Op: "initialize", Stderr: proc.Stderr(), Err: err}
+		return nil, initializeError(err)
 	}
 	a.cascadeID = resp.GetCascadeId()
 
@@ -143,6 +144,21 @@ func New(ctx context.Context, opts ...Option) (_ *Agent, err error) {
 	a.proc.start(sessionCtx)
 	a.triggers = startTriggers(sessionCtx, cfg.triggers, a.conv, cfg.logger)
 	return a, nil
+}
+
+// initializeError presents a failed initialize as a [*HarnessError].
+//
+// The internal [*harness.StartError] already carries the harness's stderr, and
+// [HarnessError.Error] prints stderr of its own, so the internal layer is
+// unwrapped rather than nested: reporting the same output twice in one message
+// buries whatever else the harness had to say. Anything else — which the
+// harness package does not currently produce here — is passed through as-is.
+func initializeError(err error) error {
+	var startErr *harness.StartError
+	if errors.As(err, &startErr) {
+		return &HarnessError{Op: "initialize", Stderr: startErr.Stderr, Err: startErr.Err}
+	}
+	return &HarnessError{Op: "initialize", Err: err}
 }
 
 // Chat sends a prompt and returns the streaming response.
