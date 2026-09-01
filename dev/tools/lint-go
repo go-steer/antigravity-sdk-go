@@ -29,4 +29,24 @@ ensure_tool golangci-lint "github.com/golangci/golangci-lint/v2/cmd/golangci-lin
 # an absolute path to it rather than resolving one relative to itself.
 CONFIG="$(repo_root)/dev/tools/.golangci.yml"
 
+# One cache per checkout, gitignored.
+#
+# golangci-lint keys its cache on package content, and the cached issue
+# records carry the absolute file paths of whichever directory computed them.
+# Lint the same commit from a second checkout — a git worktree, a scratch
+# clone — and the second run replays the first one's paths. That breaks the
+# `path:` exclusions in .golangci.yml, which are anchored (`^examples/`) and
+# match against a path relative to the git root: a replayed
+# `../../elsewhere/examples/foo.go` matches nothing, so every finding the
+# examples are deliberately exempt from erupts at once.
+#
+# The failure is a convincing one. It reports 54 real findings in real files,
+# it is perfectly reproducible, and it disagrees with CI — where the cache is
+# always cold, so lint is always green. The obvious reading is that CI is
+# broken or the tree is dirty; the truth is that neither is.
+#
+# Isolating the cache per checkout removes the only way one tree's paths can
+# reach another's run. Costs a cold first lint per checkout, which is seconds.
+export GOLANGCI_LINT_CACHE="$(repo_root)/dev/.lintcache"
+
 for_each_module lint golangci-lint run --config="$CONFIG" "$@"
